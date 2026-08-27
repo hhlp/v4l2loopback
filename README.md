@@ -1,160 +1,99 @@
-# 🎥 v4l2loopback – Secure Boot Management for Fedora
+# 🎥 v4l2loopback Manager for Fedora
 
-Secure Boot compatible management script for building, signing, installing, rebuilding, reinstalling, and removing the [`v4l2loopback`](https://github.com/v4l2loopback/v4l2loopback) kernel module on Fedora.
+`v4l2loopback-manager` builds, signs, installs and maintains the upstream
+`v4l2loopback` kernel module on Fedora systems, including systems with Secure Boot.
 
-This version is intentionally simple:
 
-* No DNF hook.
-* Optional automatic check at boot using systemd.
-* Works only with the **newest installed `kernel-devel`**.
-* Before compiling, it checks whether the module already exists for that kernel.
-* If the `.ko` file already exists, it reports it and does nothing.
-* If the `.ko` file does not exist, it compiles, signs, installs, and runs `depmod`.
-* Secure Boot signing is supported with MOK.
-* systemd integration uses `ExecCondition=` so `rebuild` is executed only when the module is missing.
-* `enable-systemd` is idempotent: it creates the unit only if it does not already exist, enables it only if needed, and then runs the check immediately.
-* `disable-systemd` is state-aware: it disables and removes only what is present, reloads systemd only when changes were made, and clears a failed state only when applicable.
-* `genkey`, `needs-rebuild`, `rebuild`, `reinstall`, `uninstall`, `enable-systemd`, `disable-systemd`, and `help` are available.
-
----
-
+<!-- TOC START -->
 ## Table of Contents
 
-* [1. Requirements](#1-requirements)
-* [2. Installation](#2-installation)
-* [3. Available commands](#3-available-commands)
-* [4. Configuration](#4-configuration)
-* [5. Module options](#5-module-options)
-* [6. Persistent configuration](#6-persistent-configuration)
-* [7. Secure Boot](#7-secure-boot)
-* [8. Generate the signing key](#8-generate-the-signing-key)
-* [9. MOK enrollment](#9-mok-enrollment)
-* [10. Clone the source repository](#10-clone-the-source-repository)
-* [11. How the newest kernel is selected](#11-how-the-newest-kernel-is-selected)
-* [12. Important: newest installed kernel vs running kernel](#12-important-newest-installed-kernel-vs-running-kernel)
-* [13. `rebuild` behavior](#13-rebuild-behavior)
-* [14. If the `.ko` already exists](#14-if-the-ko-already-exists)
-* [15. If the `.ko` does not exist](#15-if-the-ko-does-not-exist)
-* [16. Compilation](#16-compilation)
-* [17. Module signing](#17-module-signing)
-* [18. Module installation](#18-module-installation)
-* [19. Loading the module](#19-loading-the-module)
-* [20. If the newest kernel is not running](#20-if-the-newest-kernel-is-not-running)
-* [21. Verify the installed module](#21-verify-the-installed-module)
-* [22. Verify a module for a specific kernel](#22-verify-a-module-for-a-specific-kernel)
-* [23. Verify the virtual camera](#23-verify-the-virtual-camera)
-* [24. `reinstall`](#24-reinstall)
-* [25. Important consideration when using `reinstall`](#25-important-consideration-when-using-reinstall)
-* [26. `uninstall`](#26-uninstall)
-* [27. MOK deletion](#27-mok-deletion)
-* [28. Removing installed modules](#28-removing-installed-modules)
-* [29. No DNF hook](#29-no-dnf-hook)
-* [30. `needs-rebuild`](#30-needs-rebuild)
-* [31. Installation and systemd integration](#31-installation-and-systemd-integration)
-* [32. Check and test the systemd service](#32-check-and-test-the-systemd-service)
-* [33. Disable systemd integration](#33-disable-systemd-integration)
-* [34. Typical first installation](#34-typical-first-installation)
-* [35. Typical workflow after a kernel update](#35-typical-workflow-after-a-kernel-update)
-* [36. Check whether a build is needed manually](#36-check-whether-a-build-is-needed-manually)
-* [37. Rebuild decision tree](#37-rebuild-decision-tree)
-* [38. systemd decision tree](#38-systemd-decision-tree)
-* [39. ShellCheck](#39-shellcheck)
-* [40. Troubleshooting](#40-troubleshooting)
-* [41. Useful diagnostic commands](#41-useful-diagnostic-commands)
-* [42. Directory layout](#42-directory-layout)
-* [43. Security notes](#43-security-notes)
-* [44. Command summary](#44-command-summary)
-* [45. Main design principle](#45-main-design-principle)
-* [46. RPM removal](#46-rpm-removal)
-* [47. Project](#47-project)
+- [Version 1.0.2 design](#version-102-design)
+- [Requirements](#requirements)
+- [RPM / COPR installation](#rpm-copr-installation)
+- [Commands](#commands)
+- [Secure Boot key](#secure-boot-key)
+- [Source tree](#source-tree)
+- [Kernel selection](#kernel-selection)
+- [Rebuild decision](#rebuild-decision)
+- [systemd integration](#systemd-integration)
+- [Persistent module configuration](#persistent-module-configuration)
+- [Verification](#verification)
+- [Kernel updates](#kernel-updates)
+- [Removal](#removal)
 
----
+<!-- TOC END -->
 
-# 1. Requirements
+## Version 1.0.2 design
 
-Install the required packages:
+The manager deliberately has no DNF hook and no systemd timer. The optional
+`v4l2loopback-rebuild.service` is a oneshot service run at boot.
+
+The target kernel is **the Fedora default boot kernel**, determined with:
+
+```bash
+sudo grubby --default-kernel
+```
+
+The same target is used by both `needs-rebuild` and `rebuild`. The manager does
+not simply choose the numerically newest installed `kernel-devel`.
+
+For the target kernel it expects:
+
+```text
+/lib/modules/<default-boot-kernel>/updates/v4l2loopback.ko
+```
+
+`needs-rebuild` validates two things:
+
+1. The module exists.
+2. `modinfo -F signer` contains `V4L2Loopback Module Signing`.
+
+Its exit status is intentionally suitable for systemd `ExecCondition=`:
+
+```text
+0 = module missing, unsigned, unreadable, or signed by another certificate
+    -> rebuild required
+
+1 = module exists and has the expected signer
+    -> no rebuild required
+```
+
+## Requirements
 
 ```bash
 sudo dnf install -y \
-    git \
-    gcc \
-    make \
-    kernel-devel \
-    openssl \
-    mokutil \
-    dracut
+    git gcc make kernel-devel openssl mokutil dracut kmod systemd grubby
 ```
 
-When installed through the RPM, the package dependencies are resolved by
-DNF. The explicit `dnf install` command above is mainly useful for development
-from the source tree.
-
-Optional but recommended for checking the virtual camera:
+Optional diagnostics:
 
 ```bash
-sudo dnf install -y v4l-utils
+sudo dnf install -y v4l-utils ShellCheck
 ```
 
-Check the running kernel:
-
-```bash
-uname -r
-```
-
-List installed `kernel-devel` packages:
-
-```bash
-rpm -q kernel-devel
-```
-
----
-
-# 2. Installation
-
-The RPM package is named:
-
-```text
-v4l2loopback-manager
-```
-
-and installs the management command as:
-
-```text
-/usr/bin/v4l2loopback
-```
-
-When the COPR repository is available, install it with:
+## RPM / COPR installation
 
 ```bash
 sudo dnf copr enable hhlp/v4l2loopback
 sudo dnf install v4l2loopback-manager
 ```
 
-Check the installed command:
+The RPM installs:
+
+```text
+/usr/bin/v4l2loopback
+```
+
+Verify:
 
 ```bash
-command -v v4l2loopback
+rpm -q v4l2loopback-manager
 rpm -qf /usr/bin/v4l2loopback
+command -v v4l2loopback
 v4l2loopback help
 ```
 
-For development directly from the source tree, the script can still be
-installed manually:
-
-```bash
-sudo install -m 755 \
-    v4l2loopback.sh \
-    /usr/bin/v4l2loopback
-```
-
-The source file remains named `v4l2loopback.sh`; the installed command
-intentionally has no `.sh` suffix.
-
----
-
-# 3. Available commands
-
-The script supports:
+## Commands
 
 ```text
 genkey
@@ -173,278 +112,43 @@ General syntax:
 sudo v4l2loopback <command>
 ```
 
-Examples:
+## Secure Boot key
 
-```bash
-sudo v4l2loopback genkey
-sudo v4l2loopback needs-rebuild
-sudo v4l2loopback rebuild
-sudo v4l2loopback reinstall
-sudo v4l2loopback uninstall
-sudo v4l2loopback enable-systemd
-sudo v4l2loopback disable-systemd
-sudo v4l2loopback help
-```
-
----
-
-# 4. Configuration
-
-The source repository is:
-
-```bash
-REPO_URL="https://github.com/v4l2loopback/v4l2loopback.git"
-REPO_DIR="/usr/src/v4l2loopback"
-```
-
-The module configuration is:
-
-```bash
-MODULE_NAME="v4l2loopback"
-MODULE_SUBDIR="updates"
-```
-
-The default module options are:
-
-```bash
-MODULE_OPTS=(
-    "devices=1"
-    "video_nr=10"
-    "card_label=VirtualCam"
-    "exclusive_caps=1"
-)
-```
-
-With this configuration the expected virtual video device is normally:
-
-```text
-/dev/video10
-```
-
-with the label:
-
-```text
-VirtualCam
-```
-
----
-
-# 5. Module options
-
-## `devices=1`
-
-Creates one virtual video device:
-
-```text
-devices=1
-```
-
-For example, to request two devices:
-
-```text
-devices=2
-```
-
-When configuring multiple devices, the other module parameters may also need multiple values.
-
----
-
-## `video_nr=10`
-
-Requests video device number 10:
-
-```text
-video_nr=10
-```
-
-Normally this creates:
-
-```text
-/dev/video10
-```
-
-Check available devices:
-
-```bash
-ls -l /dev/video*
-```
-
----
-
-## `card_label=VirtualCam`
-
-Sets the user-visible name of the virtual camera:
-
-```text
-card_label=VirtualCam
-```
-
-Check it with:
-
-```bash
-v4l2-ctl --list-devices
-```
-
----
-
-## `exclusive_caps=1`
-
-Enables exclusive capability behavior:
-
-```text
-exclusive_caps=1
-```
-
-This option is commonly useful for browsers and video-conferencing applications.
-
----
-
-# 6. Persistent configuration
-
-The script creates:
-
-```text
-/etc/modprobe.d/v4l2loopback.conf
-```
-
-with a line equivalent to:
-
-```text
-options v4l2loopback devices=1 video_nr=10 card_label=VirtualCam exclusive_caps=1
-```
-
-It also creates:
-
-```text
-/etc/modules-load.d/v4l2loopback.conf
-```
-
-containing:
-
-```text
-v4l2loopback
-```
-
-This allows the module to be loaded automatically when the relevant kernel is running.
-
----
-
-# 7. Secure Boot
-
-Check Secure Boot:
-
-```bash
-mokutil --sb-state
-```
-
-A Secure Boot enabled system normally reports:
-
-```text
-SecureBoot enabled
-```
-
-Third-party kernel modules generally need to be signed with a trusted key when Secure Boot is enabled.
-
-The script therefore supports generating a dedicated MOK signing key.
-
----
-
-# 8. Generate the signing key
-
-Run:
+Generate the project MOK:
 
 ```bash
 sudo v4l2loopback genkey
 ```
 
-The script creates:
+Files:
 
 ```text
 /var/lib/shim-signed/mok/v4l.key
 /var/lib/shim-signed/mok/v4l.der
 ```
 
-The private key is:
-
-```text
-/var/lib/shim-signed/mok/v4l.key
-```
-
-The certificate is:
-
-```text
-/var/lib/shim-signed/mok/v4l.der
-```
-
-The certificate subject is:
+Certificate subject:
 
 ```text
 CN=V4L2Loopback Module Signing
 ```
 
-The private key is protected with mode:
-
-```text
-0600
-```
-
----
-
-# 9. MOK enrollment
-
-During `genkey`, the script runs:
+Complete MOK enrollment after reboot, then verify:
 
 ```bash
-mokutil --import /var/lib/shim-signed/mok/v4l.der
+mokutil --list-enrolled |
+    grep -A5 -B5 'V4L2Loopback Module Signing'
 ```
 
-You will be asked to create a temporary password.
+## Source tree
 
-Check pending enrollment with:
-
-```bash
-mokutil --list-new
-```
-
-Then reboot:
-
-```bash
-sudo reboot
-```
-
-During startup, the blue MOK Manager screen should appear.
-
-Choose:
-
-```text
-Enroll MOK
-```
-
-and complete the enrollment using the temporary password.
-
-After Fedora starts again, verify:
-
-```bash
-mokutil --list-enrolled
-```
-
-Look for:
-
-```text
-V4L2Loopback Module Signing
-```
-
----
-
-# 10. Clone the source repository
-
-The script expects the source repository at:
+The manager expects upstream source at:
 
 ```text
 /usr/src/v4l2loopback
 ```
 
-Clone it with:
+Clone it when needed:
 
 ```bash
 sudo git clone \
@@ -452,805 +156,97 @@ sudo git clone \
     /usr/src/v4l2loopback
 ```
 
-Check it:
+## Kernel selection
+
+Show Fedora's configured default kernel:
 
 ```bash
-ls -la /usr/src/v4l2loopback
+sudo grubby --default-kernel
 ```
-
----
-
-# 11. How the newest kernel is selected
-
-The script does **not** build for every installed kernel.
-
-It determines the newest installed `kernel-devel` package with logic equivalent to:
-
-```bash
-rpm -q kernel-devel \
-    --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' |
-    sort -V |
-    tail -n 1
-```
-
-For example, if these packages are installed:
-
-```text
-6.17.3-300.fc43.x86_64
-6.17.4-300.fc43.x86_64
-6.17.5-300.fc43.x86_64
-```
-
-the selected kernel is:
-
-```text
-6.17.5-300.fc43.x86_64
-```
-
-Only that kernel is considered by `rebuild`.
-
----
-
-# 12. Important: newest installed kernel vs running kernel
-
-The newest installed kernel may not be the currently running kernel.
-
-For example:
-
-```bash
-uname -r
-```
-
-could show:
-
-```text
-6.17.4-300.fc43.x86_64
-```
-
-while the newest installed `kernel-devel` is:
-
-```text
-6.17.5-300.fc43.x86_64
-```
-
-This normally means that Fedora has installed a newer kernel but the system has not yet rebooted into it.
-
-The script will build for:
-
-```text
-6.17.5-300.fc43.x86_64
-```
-
-not for the currently running:
-
-```text
-6.17.4-300.fc43.x86_64
-```
-
-After the build, reboot to use the new kernel:
-
-```bash
-sudo reboot
-```
-
----
-
-# 13. `rebuild` behavior
-
-Run:
-
-```bash
-sudo v4l2loopback rebuild
-```
-
-The script determines the newest installed kernel and constructs this path:
-
-```text
-/lib/modules/<latest-kernel>/updates/v4l2loopback.ko
-```
-
-For example:
-
-```text
-/lib/modules/6.17.5-300.fc43.x86_64/updates/v4l2loopback.ko
-```
-
-It then checks whether this file already exists.
-
----
-
-# 14. If the `.ko` already exists
-
-If:
-
-```text
-/lib/modules/<latest-kernel>/updates/v4l2loopback.ko
-```
-
-already exists, the script reports it and exits successfully.
 
 Example:
 
 ```text
-🔎 Checking existing module:
-   /lib/modules/6.17.5-300.fc43.x86_64/updates/v4l2loopback.ko
-
-✅ Module already exists for kernel:
-   6.17.5-300.fc43.x86_64
-
-📦 Existing module:
-   /lib/modules/6.17.5-300.fc43.x86_64/updates/v4l2loopback.ko
-
-ℹ️ Nothing to do.
+/boot/vmlinuz-7.1.10-200.fc44.x86_64
 ```
 
-In this case the script does **not** execute:
+The manager extracts:
 
 ```text
-make clean
-make
-sign-file
-install
-depmod
-modprobe
+7.1.10-200.fc44.x86_64
 ```
 
-The existing module is left untouched.
-
----
-
-# 15. If the `.ko` does not exist
-
-If the module does not exist for the newest kernel, the script performs:
+and requires:
 
 ```text
-newest kernel-devel
-        │
-        ▼
-check .ko
-        │
-        ▼
-module missing
-        │
-        ▼
-check source repository
-        │
-        ▼
-check signing keys
-        │
-        ▼
-check kernel headers
-        │
-        ▼
-make clean
-        │
-        ▼
-make KERNELRELEASE=<kernel>
-        │
-        ▼
-v4l2loopback.ko
-        │
-        ▼
-sign-file
-        │
-        ▼
-install
-        │
-        ▼
-depmod
+/usr/src/kernels/7.1.10-200.fc44.x86_64
+/lib/modules/7.1.10-200.fc44.x86_64
 ```
 
----
+If `kernel-devel` for that kernel is missing, install the matching package.
 
-# 16. Compilation
-
-The build uses the selected kernel version:
-
-```bash
-make KERNELRELEASE="$kver"
-```
-
-The corresponding kernel development directory is:
+## Rebuild decision
 
 ```text
-/usr/src/kernels/<kernel-version>
+Fedora default boot kernel
+          |
+          v
+expected v4l2loopback.ko
+          |
+     +----+----+
+     |         |
+   missing    exists
+     |         |
+     |       check signer
+     |         |
+     |    +----+----+
+     |    |         |
+     |  valid     invalid
+     |    |         |
+     v    v         v
+ rebuild skip     rebuild
 ```
 
-For example:
-
-```text
-/usr/src/kernels/6.17.5-300.fc43.x86_64
-```
-
-The expected build result is:
-
-```text
-/usr/src/v4l2loopback/v4l2loopback.ko
-```
-
----
-
-# 17. Module signing
-
-The module is signed with:
-
-```text
-SHA-256
-```
-
-using:
-
-```text
-/var/lib/shim-signed/mok/v4l.key
-/var/lib/shim-signed/mok/v4l.der
-```
-
-The signing utility comes from:
-
-```text
-/usr/src/kernels/<kernel>/scripts/sign-file
-```
-
-The equivalent operation is:
-
-```bash
-/usr/src/kernels/<kernel>/scripts/sign-file \
-    sha256 \
-    /var/lib/shim-signed/mok/v4l.key \
-    /var/lib/shim-signed/mok/v4l.der \
-    v4l2loopback.ko
-```
-
----
-
-# 18. Module installation
-
-The signed module is installed as:
-
-```text
-/lib/modules/<kernel>/updates/v4l2loopback.ko
-```
-
-For example:
-
-```text
-/lib/modules/6.17.5-300.fc43.x86_64/updates/v4l2loopback.ko
-```
-
-After installation the script runs:
-
-```bash
-depmod -a <kernel-version>
-```
-
----
-
-# 19. Loading the module
-
-The script only reloads `v4l2loopback` if the selected newest kernel is also the currently running kernel.
-
-That means:
-
-```text
-latest kernel-devel == uname -r
-```
-
-If they match, the script executes logic equivalent to:
-
-```bash
-sudo modprobe -r v4l2loopback
-
-sudo modprobe \
-    v4l2loopback \
-    devices=1 \
-    video_nr=10 \
-    card_label=VirtualCam \
-    exclusive_caps=1
-```
-
-Internally the options are stored as a Bash array:
-
-```bash
-MODULE_OPTS=(
-    "devices=1"
-    "video_nr=10"
-    "card_label=VirtualCam"
-    "exclusive_caps=1"
-)
-```
-
-and passed safely as:
-
-```bash
-sudo modprobe \
-    "$MODULE_NAME" \
-    "${MODULE_OPTS[@]}"
-```
-
----
-
-# 20. If the newest kernel is not running
-
-If the module has been built for a newer kernel than the currently running one, the script does not attempt to load it.
-
-It reports something similar to:
-
-```text
-ℹ️ The module was built for a newer kernel than the
-currently running kernel.
-
-Running kernel:
-   6.17.4-300.fc43.x86_64
-
-Newest kernel:
-   6.17.5-300.fc43.x86_64
-
-Reboot to use the new kernel:
-
-   sudo reboot
-```
-
-This is expected behavior.
-
----
-
-# 21. Verify the installed module
-
-For the currently running kernel:
-
-```bash
-modinfo v4l2loopback
-```
-
-Useful fields:
-
-```bash
-modinfo v4l2loopback |
-    grep -E '^(filename|version|signer|sig_key|sig_hashalgo):'
-```
-
-The signer should normally contain:
-
-```text
-V4L2Loopback Module Signing
-```
-
----
-
-# 22. Verify a module for a specific kernel
-
-You can inspect the module for a kernel that is not currently running with:
-
-```bash
-modinfo -k <kernel-version> v4l2loopback
-```
-
-For example:
-
-```bash
-modinfo -k \
-    6.17.5-300.fc43.x86_64 \
-    v4l2loopback
-```
-
-Filter the signing information:
-
-```bash
-modinfo -k \
-    6.17.5-300.fc43.x86_64 \
-    v4l2loopback |
-    grep -E '^(filename|version|signer|sig_key|sig_hashalgo):'
-```
-
----
-
-# 23. Verify the virtual camera
-
-Check whether the module is loaded:
-
-```bash
-lsmod | grep v4l2loopback
-```
-
-Check video devices:
-
-```bash
-ls -l /dev/video*
-```
-
-With the default configuration you should normally see:
-
-```text
-/dev/video10
-```
-
-Check devices with `v4l2-ctl`:
-
-```bash
-v4l2-ctl --list-devices
-```
-
-Inspect `/dev/video10`:
-
-```bash
-v4l2-ctl \
-    --device=/dev/video10 \
-    --all
-```
-
----
-
-# 24. `reinstall`
-
-Run:
-
-```bash
-sudo v4l2loopback reinstall
-```
-
-The reinstall process performs:
-
-```text
-reinstall
-    │
-    ▼
-uninstall
-    │
-    ├── unload module
-    ├── optionally stage MOK deletion
-    ├── remove installed v4l2loopback modules
-    ├── remove configuration
-    ├── optionally remove repository
-    └── optionally remove keys
-    │
-    ▼
-prepare repository
-    │
-    ▼
-write configuration
-    │
-    ▼
-dracut -f
-    │
-    ▼
-rebuild
-```
-
-The final `rebuild` still follows the normal rule:
-
-> Only build for the newest installed `kernel-devel`.
-
----
-
-# 25. Important consideration when using `reinstall`
-
-During uninstall you may be asked:
-
-```text
-Remove source repository at /usr/src/v4l2loopback? [y/N]
-```
-
-and:
-
-```text
-Remove local signing key files in /var/lib/shim-signed/mok? [y/N]
-```
-
-If you remove the local signing keys, the rebuild cannot sign a new module until you generate another key.
-
-Therefore, for a normal reinstall, it is usually preferable to preserve:
-
-```text
-v4l.key
-v4l.der
-```
-
-unless you deliberately want to create and enroll a new signing key.
-
----
-
-# 26. `uninstall`
-
-Run:
-
-```bash
-sudo v4l2loopback uninstall
-```
-
-The script:
-
-1. Unloads `v4l2loopback` if it is loaded.
-2. Looks for the signing certificate.
-3. Optionally stages MOK certificate deletion.
-4. Removes installed `v4l2loopback.ko` files.
-5. Runs `depmod` for affected kernels.
-6. Removes persistent configuration.
-7. Optionally removes the source repository.
-8. Optionally removes local signing keys.
-
----
-
-# 27. MOK deletion
-
-If the local certificate exists:
-
-```text
-/var/lib/shim-signed/mok/v4l.der
-```
-
-the script can use it directly.
-
-Otherwise, the script attempts to export enrolled certificates and searches their subject for:
-
-```text
-CN=V4L2Loopback Module Signing
-```
-
-If found, you are asked:
-
-```text
-Stage MOK certificate deletion? [y/N]
-```
-
-If you answer:
-
-```text
-y
-```
-
-the script invokes:
-
-```bash
-mokutil --delete <certificate.der>
-```
-
-Check pending deletion with:
-
-```bash
-mokutil --list-delete
-```
-
-Then reboot and complete the deletion through MOK Manager.
-
----
-
-# 28. Removing installed modules
-
-The uninstall operation searches under:
-
-```text
-/lib/modules/*
-```
-
-for:
-
-```text
-updates/v4l2loopback.ko
-```
-
-For example:
-
-```text
-/lib/modules/6.17.4-300.fc43.x86_64/updates/v4l2loopback.ko
-/lib/modules/6.17.5-300.fc43.x86_64/updates/v4l2loopback.ko
-```
-
-Matching files are removed.
-
-The script then executes:
-
-```bash
-depmod -a <kernel>
-```
-
-for each affected kernel.
-
----
-
-# 29. No DNF hook
-
-This version intentionally does **not** install a DNF post-transaction hook.
-
-There is no:
-
-```text
-enable-hook
-```
-
-command.
-
-There is also no:
-
-```text
-/etc/dnf/plugins/post-transaction-actions.d/v4l2loopback-rebuild.sh
-```
-
-created by the script.
-
-Instead, the script can optionally install a **systemd oneshot service** that performs the check at boot.
-
-The service is:
-
-```text
-/etc/systemd/system/v4l2loopback-rebuild.service
-```
-
-The service is created dynamically by `enable-systemd`; it is not a static
-unit shipped and owned by the RPM.
-
-It does not rebuild unconditionally. It first runs:
-
-```text
-/usr/bin/v4l2loopback needs-rebuild
-```
-
-If the module already exists, systemd skips the rebuild.
-
-If the module is missing, systemd runs:
-
-```bash
-/usr/bin/v4l2loopback rebuild
-```
-
-The script always selects the newest installed `kernel-devel`.
-
----
-
-# 30. `needs-rebuild`
-
-Run:
-
-```bash
-sudo v4l2loopback needs-rebuild
-```
-
-This command determines the newest installed `kernel-devel` and checks:
-
-```text
-/lib/modules/<latest-kernel>/updates/v4l2loopback.ko
-```
-
-Its exit status is intentionally designed for systemd `ExecCondition=`:
-
-```text
-0 = module is missing -> rebuild required
-1 = module exists     -> nothing required
-```
-
-The check is intentionally based only on whether the expected `.ko` file exists. It does **not** verify the module signature on every boot.
-
-This is consistent with the script workflow: when the module is missing, `rebuild` compiles it, signs it, installs the signed `.ko`, and runs `depmod`. Therefore, a module successfully created by this script is signed before it is installed.
-
-In other words:
-
-```text
-.ko missing
-    │
-    ▼
-needs-rebuild -> exit 0
-    │
-    ▼
-rebuild
-    │
-    ├── compile
-    ├── sign
-    ├── install signed .ko
-    └── depmod
-```
-
-An existing `.ko` is trusted as already prepared by this workflow and is left untouched.
-
-Example:
+Run manually:
 
 ```bash
 sudo v4l2loopback needs-rebuild
 echo $?
+
+sudo v4l2loopback rebuild
 ```
 
-If the result is:
+`rebuild` independently checks the same target and signature, so a manual
+`rebuild` also avoids recompiling a valid module. If the module exists but is
+unsigned or signed by another certificate, it is rebuilt and replaced.
+
+The build sequence is:
 
 ```text
-0
+make clean
+-> make KERNELRELEASE=<default-boot-kernel>
+-> sign-file sha256
+-> install .ko
+-> depmod -a <kernel>
 ```
 
-the module is missing.
+The module is reloaded immediately only when the target kernel equals `uname -r`.
+Otherwise it is prepared for the next boot.
 
-If the result is:
+## systemd integration
 
-```text
-1
-```
-
-the module already exists and no build is needed.
-
-When this command is used by systemd through `ExecCondition=`, exit status `1` is expected and means the condition evaluated to false. systemd therefore skips `ExecStart=`.
-
-You may see output similar to:
-
-```text
-ExecCondition=/usr/bin/v4l2loopback needs-rebuild
-(code=exited, status=1/FAILURE)
-
-v4l2loopback-rebuild.service: Skipped due to 'exec-condition'.
-Condition check resulted in v4l2loopback-rebuild.service being skipped.
-```
-
-In this context, `status=1/FAILURE` does **not** mean that the service itself failed. It means:
-
-```text
-.ko exists
-    │
-    ▼
-needs-rebuild returns 1
-    │
-    ▼
-ExecCondition is false
-    │
-    ▼
-ExecStart is skipped
-    │
-    ▼
-nothing to rebuild
-```
-
-It also does not independently prove that an arbitrary existing `.ko` is signed; it only proves that the file exists. The signing guarantee comes from the script's own successful `rebuild` workflow.
-
----
-
-# 31. Installation and systemd integration
-
-Install the management script:
-
-```bash
-sudo install -m 755 \
-    v4l2loopback.sh \
-    /usr/bin/v4l2loopback
-```
-
-Enable the automatic systemd check at boot:
+Enable:
 
 ```bash
 sudo v4l2loopback enable-systemd
 ```
 
-This manages the following oneshot unit:
-
-```text
-v4l2loopback-rebuild.service
-```
-
-The service checks whether the expected module exists for the newest installed `kernel-devel`:
-
-```text
-/lib/modules/<latest-kernel>/updates/v4l2loopback.ko
-```
-
-If the `.ko` already exists, the rebuild is skipped. If it is missing, systemd runs the script's `rebuild` command, which compiles, signs, installs the module, and runs `depmod`.
-
-The `enable-systemd` command is idempotent:
-
-```text
-unit missing
-    -> create unit
-    -> daemon-reload
-    -> enable service
-
-unit exists but disabled
-    -> keep existing unit
-    -> enable service
-
-unit exists and enabled
-    -> keep existing unit
-    -> report that it is already enabled
-```
-
-After enabling the unit, the script also starts it once immediately so the same check can be tested without rebooting.
-
-The generated service is conceptually equivalent to:
+Generated unit:
 
 ```ini
 [Unit]
-Description=Ensure v4l2loopback exists for newest installed kernel
+Description=Ensure v4l2loopback is available for Fedora default boot kernel
+Documentation=https://github.com/hhlp/v4l2loopback
 After=local-fs.target
 ConditionPathExists=/usr/bin/v4l2loopback
 
@@ -1263,1127 +259,82 @@ ExecStart=/usr/bin/v4l2loopback rebuild
 WantedBy=multi-user.target
 ```
 
-The key lines are:
+At every boot systemd evaluates the condition. Exit `1` from `needs-rebuild`
+means the module is already valid, so `ExecStart=` is intentionally skipped.
+systemd may display `status=1/FAILURE` for the condition process; in this design
+that is the expected false condition, not a failed compilation.
 
-```ini
-ExecCondition=/usr/bin/v4l2loopback needs-rebuild
-ExecStart=/usr/bin/v4l2loopback rebuild
-```
-
-`ExecCondition=` is evaluated first:
-
-```text
-needs-rebuild returns 1
-    -> .ko exists
-    -> condition is false
-    -> ExecStart is skipped
-
-needs-rebuild returns 0
-    -> .ko is missing
-    -> condition is true
-    -> ExecStart runs rebuild
-```
-
-The complete boot-time flow is:
-
-```text
-                    SYSTEM BOOT
-                         │
-                         ▼
-           v4l2loopback-rebuild.service
-                         │
-                         ▼
-                   ExecCondition
-                         │
-                         ▼
-                    needs-rebuild
-                         │
-               ┌─────────┴─────────┐
-               │                   │
-         .ko EXISTS          .ko IS MISSING
-               │                   │
-               ▼                   ▼
-            exit 1              exit 0
-               │                   │
-               ▼                   ▼
-        skip ExecStart          ExecStart
-                                   │
-                                   ▼
-                    v4l2loopback rebuild
-                                   │
-                         ┌─────────┼─────────┐
-                         ▼         ▼         ▼
-                      compile     sign     install
-                                             │
-                                             ▼
-                                           depmod
-```
-
-This avoids unnecessary compilation at every boot. The module is rebuilt only when `v4l2loopback.ko` is missing for the newest installed kernel.
-
----
-
-# 32. Check and test the systemd service
-
-Verify the service status:
+Check:
 
 ```bash
 systemctl status v4l2loopback-rebuild.service
-```
-
-Check whether it is enabled at boot:
-
-```bash
 systemctl is-enabled v4l2loopback-rebuild.service
-```
-
-You can manually run the same condition used by systemd:
-
-```bash
-sudo v4l2loopback needs-rebuild
-echo $?
-```
-
-The exit status means:
-
-```text
-0  -> v4l2loopback.ko is missing
-     -> rebuild is required
-
-1  -> v4l2loopback.ko already exists
-     -> no rebuild is required
-```
-
-This behavior is intentional because `needs-rebuild` is used as a systemd `ExecCondition=`.
-
-Conceptually:
-
-```text
-needs-rebuild
-      │
-      ▼
-Does v4l2loopback.ko exist?
-      │
-  ┌───┴───┐
-  │       │
- YES      NO
-  │       │
-exit 1   exit 0
-  │       │
-  ▼       ▼
- skip    rebuild
-```
-
-You can simulate the boot-time check without rebooting:
-
-```bash
-sudo systemctl start v4l2loopback-rebuild.service
-```
-
-Then inspect the result:
-
-```bash
-systemctl status v4l2loopback-rebuild.service
-```
-
-If the module already exists, systemd may show output similar to:
-
-```text
-ExecCondition=/usr/bin/v4l2loopback needs-rebuild
-(code=exited, status=1/FAILURE)
-
-v4l2loopback-rebuild.service: Skipped due to 'exec-condition'.
-Condition check resulted in v4l2loopback-rebuild.service being skipped.
-```
-
-This is **expected**. In this context, `status=1/FAILURE` refers to the condition command returning `1`; it does not mean that the rebuild service itself failed. It means the `.ko` already exists, so `ExecStart=` was intentionally skipped.
-
-View all service logs:
-
-```bash
-journalctl -u v4l2loopback-rebuild.service
-```
-
-View only logs from the current boot:
-
-```bash
 journalctl -b -u v4l2loopback-rebuild.service
 ```
 
----
-
-# 33. Disable systemd integration
-
-Disable the automatic boot-time check and remove the unit:
+Disable and remove the dynamically generated unit:
 
 ```bash
 sudo v4l2loopback disable-systemd
 ```
 
-The operation is state-aware and idempotent:
+If upgrading from an older release whose generated unit already exists,
+`enable-systemd` preserves that file. Run `disable-systemd` followed by
+`enable-systemd` if you want to regenerate the unit text with the 1.0.2
+description.
+
+## Persistent module configuration
+
+The manager uses:
 
 ```text
-enabled + unit exists
-    -> disable service
-    -> remove unit
-    -> daemon-reload
-
-disabled + unit exists
-    -> nothing to disable
-    -> remove unit
-    -> daemon-reload
-
-enabled + unit missing
-    -> disable service
-    -> nothing to remove
-    -> daemon-reload
-
-disabled + unit missing
-    -> nothing to disable
-    -> nothing to remove
-    -> no daemon-reload required
+/etc/modprobe.d/v4l2loopback.conf
+/etc/modules-load.d/v4l2loopback.conf
 ```
 
-More specifically, `disable-systemd`:
+Default options:
 
-1. Checks whether `v4l2loopback-rebuild.service` is enabled.
-2. Disables it only if it is currently enabled.
-3. Checks whether `/etc/systemd/system/v4l2loopback-rebuild.service` exists.
-4. Removes the unit file only if it exists.
-5. Runs `systemctl daemon-reload` only when something actually changed.
-6. Clears the failed state only if the service is currently marked as failed.
-
-After disabling systemd integration, the module can still be checked or rebuilt manually:
-
-```bash
-sudo v4l2loopback needs-rebuild
-sudo v4l2loopback rebuild
+```text
+devices=1 video_nr=10 card_label=VirtualCam exclusive_caps=1
 ```
 
----
-
-# 34. Typical first installation
-
-Install the requirements:
+## Verification
 
 ```bash
-sudo dnf install -y \
-    git \
-    gcc \
-    make \
-    kernel-devel \
-    openssl \
-    mokutil \
-    dracut \
-    v4l-utils
-```
+TARGET="$(sudo grubby --default-kernel)"
+TARGET="${TARGET##*/}"
+TARGET="${TARGET#vmlinuz-}"
 
-Install the management script:
-
-```bash
-sudo install -m 755 \
-    v4l2loopback.sh \
-    /usr/bin/v4l2loopback
-```
-
-Clone the source:
-
-```bash
-sudo git clone \
-    https://github.com/v4l2loopback/v4l2loopback.git \
-    /usr/src/v4l2loopback
-```
-
-Generate and request enrollment of the signing key:
-
-```bash
-sudo v4l2loopback genkey
-```
-
-Reboot:
-
-```bash
-sudo reboot
-```
-
-Complete MOK enrollment.
-
-After returning to Fedora:
-
-```bash
-sudo v4l2loopback rebuild
-```
-
-Optionally enable the automatic boot-time check:
-
-```bash
-sudo v4l2loopback enable-systemd
-```
-
-Then verify:
-
-```bash
-modinfo v4l2loopback |
+modinfo -k "$TARGET" v4l2loopback |
     grep -E '^(filename|version|signer|sig_key|sig_hashalgo):'
 ```
 
-Check the virtual camera:
-
-```bash
-v4l2-ctl --list-devices
-```
-
----
-
-# 35. Typical workflow after a kernel update
-
-Assume Fedora installs a new kernel.
-
-If systemd integration is enabled, the normal workflow is simply:
-
-```text
-kernel update
-    │
-    ▼
-reboot
-    │
-    ▼
-systemd runs needs-rebuild
-    │
-    ├── .ko exists -> nothing to do
-    │
-    └── .ko missing -> rebuild
-```
-
-When `.ko` is missing, the rebuild path is:
-
-```text
-compile
-   │
-   ▼
-sign
-   │
-   ▼
-install signed .ko
-   │
-   ▼
-depmod
-```
-
-When `.ko` already exists, the systemd condition returns `1` and the service is skipped without rebuilding.
-
-You can still check manually:
-
-```bash
-rpm -q kernel-devel
-```
-
-and run:
-
-```bash
-sudo v4l2loopback rebuild
-```
-
-Two cases are possible.
-
-## Case 1: the module already exists
-
-The script reports:
-
-```text
-✅ Module already exists
-ℹ️ Nothing to do.
-```
-
-No build occurs.
-
-## Case 2: the module does not exist
-
-The script:
-
-```text
-compile
-   │
-   ▼
-sign
-   │
-   ▼
-install
-   │
-   ▼
-depmod
-```
-
-If the new kernel is not yet running, reboot:
-
-```bash
-sudo reboot
-```
-
----
-
-# 36. Check whether a build is needed manually
-
-The easiest method is:
-
-```bash
-sudo v4l2loopback needs-rebuild
-echo $?
-```
-
-You can also check the path manually.
-
-Determine the newest kernel-devel:
-
-```bash
-LATEST_KERNEL="$(
-    rpm -q kernel-devel \
-        --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' |
-        sort -V |
-        tail -n 1
-)"
-```
-
-Print it:
-
-```bash
-echo "$LATEST_KERNEL"
-```
-
-Check the expected module:
-
-```bash
-ls -l \
-    "/lib/modules/$LATEST_KERNEL/updates/v4l2loopback.ko"
-```
-
-If the file exists, `rebuild` will do nothing.
-
-If it does not exist, `rebuild` will create it.
-
----
-
-# 37. Rebuild decision tree
-
-```text
-                rebuild
-                   │
-                   ▼
-      newest installed kernel-devel
-                   │
-                   ▼
- /lib/modules/<kernel>/updates/v4l2loopback.ko
-                   │
-            ┌──────┴──────┐
-            │             │
-         EXISTS        MISSING
-            │             │
-            ▼             ▼
-        report it       check repo
-            │             │
-            ▼             ▼
-      nothing to do     check keys
-                          │
-                          ▼
-                     check headers
-                          │
-                          ▼
-                      compile
-                          │
-                          ▼
-                        sign
-                          │
-                          ▼
-                       install
-                          │
-                          ▼
-                        depmod
-                          │
-                          ▼
-              running kernel == latest?
-                     ┌────┴────┐
-                     │         │
-                    yes        no
-                     │         │
-                     ▼         ▼
-                 modprobe    tell user
-                            to reboot
-```
-
----
-
-# 38. systemd decision tree
-
-```text
-                 boot
-                   │
-                   ▼
- v4l2loopback-rebuild.service
-                   │
-                   ▼
-             ExecCondition
-                   │
-                   ▼
-          needs-rebuild
-                   │
-            ┌──────┴──────┐
-            │             │
-         EXISTS        MISSING
-            │             │
-         exit 1         exit 0
-            │             │
-            ▼             ▼
-      skip ExecStart   ExecStart
-                          │
-                          ▼
-                       rebuild
-                          │
-                 ┌────────┼────────┐
-                 ▼        ▼        ▼
-              compile    sign    install
-                                   │
-                                   ▼
-                                 depmod
-```
-
-This means the service can safely be enabled permanently without rebuilding the module at every boot.
-
-The `exit 1` branch is a normal false `ExecCondition=` result. Although systemd may display `status=1/FAILURE` for the condition command, the intended outcome is to skip `ExecStart=` because there is nothing to rebuild.
-
----
-
-# 39. ShellCheck
-
-Install ShellCheck:
-
-```bash
-sudo dnf install -y ShellCheck
-```
-
-Run:
-
-```bash
-shellcheck v4l2loopback.sh
-```
-
-Module options are stored as:
-
-```bash
-MODULE_OPTS=(
-    "devices=1"
-    "video_nr=10"
-    "card_label=VirtualCam"
-    "exclusive_caps=1"
-)
-```
-
-For `modprobe`, use:
-
-```bash
-"${MODULE_OPTS[@]}"
-```
-
-because every option must be passed as a separate argument.
-
-Conceptually:
-
-```text
-"${MODULE_OPTS[@]}"
-
-        │
-        ├── devices=1
-        ├── video_nr=10
-        ├── card_label=VirtualCam
-        └── exclusive_caps=1
-```
-
-For generating `/etc/modprobe.d/v4l2loopback.conf`, the script uses:
-
-```bash
-"${MODULE_OPTS[*]}"
-```
-
-because the configuration requires a single textual line.
-
----
-
-# 40. Troubleshooting
-
-## systemd service does not run `rebuild`
-
-Check the condition manually:
-
-```bash
-sudo v4l2loopback needs-rebuild
-echo $?
-```
-
-If it returns `1`, the module already exists, so systemd correctly skips `ExecStart=`. Seeing `status=1/FAILURE` for `ExecCondition=` is expected in this case and does not mean the service rebuild failed.
-
-Check the expected file:
-
-```bash
-LATEST_KERNEL="$(
-    rpm -q kernel-devel \
-        --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' |
-        sort -V |
-        tail -n 1
-)"
-
-ls -l "/lib/modules/$LATEST_KERNEL/updates/v4l2loopback.ko"
-```
-
-Check service status:
-
-```bash
-systemctl status v4l2loopback-rebuild.service
-```
-
-Check logs:
-
-```bash
-journalctl -b -u v4l2loopback-rebuild.service
-```
-
-## systemd service is not enabled
-
-Check:
-
-```bash
-systemctl is-enabled v4l2loopback-rebuild.service
-```
-
-Enable it again with:
-
-```bash
-sudo v4l2loopback enable-systemd
-```
-
-## No `kernel-devel` installed
-
-If the script reports:
-
-```text
-No kernel-devel packages found
-```
-
-install it:
-
-```bash
-sudo dnf install -y kernel-devel
-```
-
-Check:
-
-```bash
-rpm -q kernel-devel
-```
-
-Then:
-
-```bash
-sudo v4l2loopback rebuild
-```
-
----
-
-## Source repository is missing
-
-If the script reports:
-
-```text
-Source repository not found
-```
-
-clone it:
-
-```bash
-sudo git clone \
-    https://github.com/v4l2loopback/v4l2loopback.git \
-    /usr/src/v4l2loopback
-```
-
-Then:
-
-```bash
-sudo v4l2loopback rebuild
-```
-
----
-
-## Signing keys are missing
-
-Check:
-
-```bash
-sudo ls -l /var/lib/shim-signed/mok/
-```
-
-Expected:
-
-```text
-v4l.key
-v4l.der
-```
-
-If they are missing:
-
-```bash
-sudo v4l2loopback genkey
-```
-
-Complete MOK enrollment after reboot before relying on the signed module under Secure Boot.
-
----
-
-## Module rejected by Secure Boot
-
-If `modprobe` reports something similar to:
-
-```text
-Key was rejected by service
-```
-
-check:
-
-```bash
-mokutil --sb-state
-```
-
-Then:
-
-```bash
-mokutil --list-enrolled
-```
-
-Look for:
+Expected signer:
 
 ```text
 V4L2Loopback Module Signing
 ```
 
-Check the signature:
-
-```bash
-modinfo v4l2loopback |
-    grep -E '^(signer|sig_key|sig_hashalgo):'
-```
-
----
-
-## New module was built but not loaded
-
-Compare:
-
-```bash
-uname -r
-```
-
-with:
-
-```bash
-rpm -q kernel-devel \
-    --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' |
-    sort -V |
-    tail -n 1
-```
-
-If they are different, the module was built for a newer installed kernel.
-
-Reboot:
-
-```bash
-sudo reboot
-```
-
----
-
-## `/dev/video10` does not exist
-
-Check whether the module is loaded:
+For the running kernel:
 
 ```bash
 lsmod | grep v4l2loopback
-```
-
-Check kernel messages:
-
-```bash
-dmesg | grep -i v4l2loopback
-```
-
-Try loading manually:
-
-```bash
-sudo modprobe \
-    v4l2loopback \
-    devices=1 \
-    video_nr=10 \
-    card_label=VirtualCam \
-    exclusive_caps=1
-```
-
-Check again:
-
-```bash
-ls -l /dev/video*
-```
-
----
-
-## Module is busy
-
-If:
-
-```bash
-sudo modprobe -r v4l2loopback
-```
-
-cannot unload the module, check which program is using the virtual camera:
-
-```bash
-sudo fuser -v /dev/video10
-```
-
-Close that application and try again.
-
----
-
-## After a BIOS/UEFI firmware update, do I need to reinstall or generate a new key?
-
-Usually, no.
-
-A BIOS/UEFI firmware update does not normally require you to reinstall `v4l2loopback`, rebuild the module, or generate a new MOK signing key.
-
-After the firmware update, first verify the Secure Boot state:
-
-```bash
-mokutil --sb-state
-```
-
-Then verify that the `v4l2loopback` signing certificate is still enrolled:
-
-```bash
-mokutil --list-enrolled |
-    grep -A5 -B5 'V4L2Loopback Module Signing'
-```
-
-Also verify the installed module signer:
-
-```bash
-modinfo v4l2loopback |
-    grep -E '^(filename|signer|sig_key|sig_hashalgo):'
-```
-
-If the MOK certificate is still enrolled and the module signer is correct, nothing else is required:
-
-```text
-genkey    -> not needed
-rebuild   -> not needed because of the BIOS update alone
-reinstall -> not needed
-```
-
-Some BIOS/UEFI updates may reset firmware settings or UEFI NVRAM variables. If the enrolled MOK certificate disappears but the local key files still exist:
-
-```text
-/var/lib/shim-signed/mok/v4l.key
-/var/lib/shim-signed/mok/v4l.der
-```
-
-do **not** generate a new key. Re-enroll the existing certificate instead:
-
-```bash
-sudo mokutil --import \
-    /var/lib/shim-signed/mok/v4l.der
-```
-
-Then reboot and complete the MOK enrollment from the MOK Manager screen.
-
-Only generate a new key if the original key/certificate files are missing or if you intentionally want to rotate the signing key.
-
-The recovery decision is:
-
-```text
-                  BIOS/UEFI UPDATE
-                         │
-                         ▼
-               check Secure Boot state
-                         │
-                         ▼
-              mokutil --list-enrolled
-                         │
-                ┌────────┴────────┐
-                │                 │
-          MOK still there      MOK missing
-                │                 │
-                ▼                 ▼
-           do nothing       do key files exist?
-                                  │
-                           ┌──────┴──────┐
-                           │             │
-                          YES            NO
-                           │             │
-                           ▼             ▼
-                   re-import v4l.der   genkey
-                           │             │
-                           ▼             ▼
-                      reboot/MOK      reboot/MOK
-                      enrollment      enrollment
-```
-
-Keeping the existing key is preferable whenever possible because modules already built by this script were signed with that key.
-
----
-
-# 41. Useful diagnostic commands
-
-Running kernel:
-
-```bash
-uname -r
-```
-
-Installed kernels:
-
-```bash
-rpm -q kernel
-```
-
-Installed kernel development packages:
-
-```bash
-rpm -q kernel-devel
-```
-
-Newest installed `kernel-devel`:
-
-```bash
-rpm -q kernel-devel \
-    --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' |
-    sort -V |
-    tail -n 1
-```
-
-Secure Boot state:
-
-```bash
-mokutil --sb-state
-```
-
-Pending MOK enrollment:
-
-```bash
-mokutil --list-new
-```
-
-Pending MOK deletion:
-
-```bash
-mokutil --list-delete
-```
-
-Enrolled MOK certificates:
-
-```bash
-mokutil --list-enrolled
-```
-
-Loaded module:
-
-```bash
-lsmod | grep v4l2loopback
-```
-
-Module information:
-
-```bash
-modinfo v4l2loopback
-```
-
-Virtual video devices:
-
-```bash
 v4l2-ctl --list-devices
 ```
 
-Kernel messages:
+## Kernel updates
 
-```bash
-dmesg | grep -i v4l2loopback
-```
+After `dnf upgrade`, Fedora normally changes the default boot kernel to the new
+kernel. On the next boot the oneshot service asks `grubby` for that configured
+default, checks the corresponding module and signer, and rebuilds only if needed.
 
-Check whether a rebuild is required:
+This means the manager follows the kernel Fedora is configured to boot, rather
+than assuming that the highest installed `kernel-devel` is always the intended
+kernel.
 
-```bash
-sudo v4l2loopback needs-rebuild
-echo $?
-```
+## Removal
 
-systemd service status:
-
-```bash
-systemctl status v4l2loopback-rebuild.service
-```
-
-systemd service enabled state:
-
-```bash
-systemctl is-enabled v4l2loopback-rebuild.service
-```
-
-systemd logs:
-
-```bash
-journalctl -b -u v4l2loopback-rebuild.service
-```
-
----
-
-# 42. Directory layout
-
-A typical installation looks like:
-
-```text
-/
-├── usr/
-│   ├── local/
-│   │   └── bin/
-│   │       └── v4l2loopback.sh
-│   │
-│   └── src/
-│       ├── kernels/
-│       │   └── <kernel-version>/
-│       │
-│       └── v4l2loopback/
-│
-├── var/
-│   └── lib/
-│       └── shim-signed/
-│           └── mok/
-│               ├── v4l.key
-│               └── v4l.der
-│
-├── etc/
-│   ├── systemd/
-│   │   └── system/
-│   │       └── v4l2loopback-rebuild.service
-│   │
-│   ├── modprobe.d/
-│   │   └── v4l2loopback.conf
-│   │
-│   └── modules-load.d/
-│       └── v4l2loopback.conf
-│
-└── lib/
-    └── modules/
-        └── <kernel-version>/
-            └── updates/
-                └── v4l2loopback.ko
-```
-
-There is deliberately no DNF hook directory or hook script managed by this project.
-
-The systemd service exists only when `enable-systemd` has been executed.
-
----
-
-# 43. Security notes
-
-Protect the private signing key:
-
-```text
-/var/lib/shim-signed/mok/v4l.key
-```
-
-The script sets:
-
-```text
-0600
-```
-
-permissions.
-
-Do not commit the private key to Git.
-
-A useful `.gitignore` may contain:
-
-```gitignore
-*.key
-*.pem
-*.der
-*.crt
-*.cer
-```
-
-The DER certificate itself is public material, but keeping locally generated signing material outside the repository helps avoid accidental machine-specific files being committed.
-
----
-
-# 44. Command summary
-
-| Command           | Purpose                                                                              |
-| ----------------- | ------------------------------------------------------------------------------------ |
-| `genkey`          | Generate signing key and request MOK enrollment                                      |
-| `needs-rebuild`   | Return whether the newest kernel is missing `v4l2loopback.ko`                        |
-| `rebuild`         | Check/build only for the newest installed `kernel-devel`                             |
-| `reinstall`       | Uninstall, restore configuration/source and rebuild                                  |
-| `uninstall`       | Remove modules/config and optionally MOK/source/keys                                 |
-| `enable-systemd`  | Create if missing, enable if needed, and run the boot-time systemd check immediately |
-| `disable-systemd` | Disable/remove only when present and clean systemd state as needed                   |
-| `help`            | Display command help                                                                 |
-
-There is intentionally no:
-
-```text
-enable-hook
-```
-
-command.
-
----
-
-# 45. Main design principle
-
-The central behavior of this version is:
-
-```text
-boot or manual check
-        │
-        ▼
-newest installed kernel-devel
-        │
-        ▼
-does v4l2loopback.ko exist?
-        │
-   ┌────┴────┐
-   │         │
-  yes        no
-   │         │
-   ▼         ▼
-nothing    rebuild
-to do        │
-             ├── compile
-             ├── sign
-             ├── install
-             └── depmod
-```
-
-This prevents unnecessary rebuilding or overwriting of a module that has already been prepared for the newest installed kernel.
-
-With systemd enabled, the same logic is evaluated automatically at boot using `ExecCondition=`.
-
-The existence test is deliberately simple: the service checks whether the expected `.ko` exists. If it is missing, the script rebuilds it and signs it before installation. If it already exists, the file is preserved and no signature re-check is performed during the boot-time condition.
-
----
-
-
-# 46. RPM removal
-
-The RPM owns the management command and package documentation, but it does
-not own the kernel modules built locally by the manager, the local source
-repository, MOK material, or the dynamically generated systemd unit.
-
-For a complete cleanup, run the manager **before** removing the RPM:
+Before removing the RPM, when cleanup is desired:
 
 ```bash
 sudo v4l2loopback uninstall
@@ -2391,34 +342,8 @@ sudo v4l2loopback disable-systemd
 sudo dnf remove v4l2loopback-manager
 ```
 
-The RPM `%preun` scriptlet may print this cleanup reminder during final
-package removal. It is informational: RPM removal itself does not
-automatically delete locally built modules, MOK state, signing keys, the
-source repository, or the dynamically generated systemd service.
+The RPM intentionally does not silently remove locally generated signing keys,
+MOK state, source trees, locally built modules, or dynamically generated systemd
+state.
 
-Do not postpone the manager commands until after `dnf remove`, because
-`/usr/bin/v4l2loopback` is removed with the package.
-
----
-
-# 47. Project
-
-
-This script is a Fedora-oriented helper around the upstream:
-
-[`v4l2loopback`](https://github.com/v4l2loopback/v4l2loopback)
-
-The upstream project provides the kernel module itself.
-
-This management script adds:
-
-* Fedora-oriented source placement.
-* Secure Boot signing.
-* MOK management.
-* Persistent module configuration.
-* Selection of only the newest installed kernel.
-* Detection of an already-installed `.ko`.
-* Conditional build only when necessary.
-* Optional boot-time systemd validation with `ExecCondition=`.
-* Built-in commands to enable and disable the systemd service.
-* Reinstallation and removal workflows.
+See `FAQ.md` and `TEST.md` for troubleshooting and validation.

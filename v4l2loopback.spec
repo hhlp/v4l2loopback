@@ -1,5 +1,5 @@
 Name:           v4l2loopback-manager
-Version:        1.0.1
+Version:        1.0.2
 Release:        1%{?dist}
 Summary:        Secure Boot manager for v4l2loopback on Fedora
 
@@ -19,6 +19,7 @@ Requires:       mokutil
 Requires:       dracut
 Requires:       kmod
 Requires:       systemd
+Requires:       grubby
 
 %description
 v4l2loopback-manager is a Fedora management utility for building,
@@ -27,11 +28,11 @@ kernel module.
 
 It supports Secure Boot using a Machine Owner Key (MOK) and can
 optionally create and enable a systemd service that checks whether
-v4l2loopback.ko exists for the newest installed Fedora kernel-devel.
+v4l2loopback.ko exists for the Fedora default boot kernel and whether
+the module is signed with the expected Secure Boot signing key.
 
 The kernel module itself is not shipped by this RPM. It is compiled
-locally for the newest installed kernel-devel by the management
-utility.
+locally for the Fedora default boot kernel by the management utility.
 
 %prep
 %autosetup -n v4l2loopback-%{version}
@@ -79,6 +80,15 @@ fi
 %{_bindir}/v4l2loopback
 
 %changelog
+* Thu Aug 27 2026 hhlp <hhlp@users.noreply.github.com> - 1.0.2-1
+- Use the Fedora default boot kernel as the module build target
+- Detect the target kernel using grubby --default-kernel
+- Verify that v4l2loopback.ko is signed with the expected MOK certificate
+- Rebuild when the module is missing, unsigned, or signed by another key
+- Keep needs-rebuild exit codes compatible with systemd ExecCondition
+- Add grubby runtime dependency
+- Update systemd service descriptions, documentation, and tests
+
 * Thu Aug 27 2026 hhlp <hhlp@users.noreply.github.com> - 1.0.1-1
 - Use /usr/bin/v4l2loopback as the canonical Fedora executable path
 - Install the manager with %{_bindir}

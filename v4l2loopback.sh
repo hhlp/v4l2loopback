@@ -49,29 +49,51 @@ SYSTEMD_SERVICE_NAME="v4l2loopback-rebuild.service"
 SYSTEMD_SERVICE="/etc/systemd/system/$SYSTEMD_SERVICE_NAME"
 
 # ============================================================
-# GET NEWEST INSTALLED KERNEL-DEVEL
+# GET FEDORA DEFAULT BOOT KERNEL
 # ============================================================
 
-get_latest_kernel() {
-    local latest_kernel
+get_target_kernel() {
+    local kernel_path
+    local kver
 
-    latest_kernel="$(
-        rpm -q kernel-devel \
-            --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' 2>/dev/null |
-            sort -V |
-            tail -n 1
-    )"
+    if [[ "$EUID" -eq 0 ]]; then
+        kernel_path="$(grubby --default-kernel 2>/dev/null)" || {
+            echo "❌ Unable to determine Fedora default boot kernel." >&2
+            return 1
+        }
+    else
+        kernel_path="$(sudo grubby --default-kernel 2>/dev/null)" || {
+            echo "❌ Unable to determine Fedora default boot kernel." >&2
+            echo "Try running this command with sudo." >&2
+            return 1
+        }
+    fi
 
-    if [[ -z "$latest_kernel" ]]; then
-        echo "❌ No kernel-devel packages found." >&2
-        echo >&2
-        echo "Install kernel-devel first:" >&2
-        echo >&2
-        echo "   sudo dnf install -y kernel-devel" >&2
+    kver="$(basename "$kernel_path")"
+    kver="${kver#vmlinuz-}"
+
+    if [[ -z "$kver" || "$kver" == "$kernel_path" ]]; then
+        echo "❌ Invalid default kernel returned by grubby:" >&2
+        echo "   $kernel_path" >&2
         return 1
     fi
 
-    printf '%s\n' "$latest_kernel"
+    if [[ ! -d "/lib/modules/$kver" ]]; then
+        echo "❌ Module directory does not exist for the default boot kernel:" >&2
+        echo "   /lib/modules/$kver" >&2
+        return 1
+    fi
+
+    if [[ ! -d "/usr/src/kernels/$kver" ]]; then
+        echo "❌ kernel-devel is not installed for the default boot kernel:" >&2
+        echo "   $kver" >&2
+        echo >&2
+        echo "Install it with:" >&2
+        echo "   sudo dnf install kernel-devel-$kver" >&2
+        return 1
+    fi
+
+    printf '%s\n' "$kver"
 }
 
 # ============================================================
@@ -81,7 +103,7 @@ get_latest_kernel() {
 get_module_path() {
     local kver
 
-    kver="$(get_latest_kernel)"
+    kver="$(get_target_kernel)"
 
     printf '/lib/modules/%s/%s/%s.ko\n' \
         "$kver" \
@@ -90,12 +112,30 @@ get_module_path() {
 }
 
 # ============================================================
+# MODULE SIGNATURE CHECK
+#
+# Return:
+#   0 -> module is signed by the expected certificate
+#   1 -> module is unsigned, unreadable, or signed by another key
+# ============================================================
+
+module_signature_is_valid() {
+    local module_path="$1"
+    local signer
+    local expected_signer="${CN_MATCH#CN=}"
+
+    signer="$(modinfo -F signer "$module_path" 2>/dev/null || true)"
+
+    [[ -n "$signer" && "$signer" == *"$expected_signer"* ]]
+}
+
+# ============================================================
 # NEEDS REBUILD
 #
 # Exit codes:
 #
-#   0 -> module is missing -> rebuild required
-#   1 -> module exists     -> nothing required
+#   0 -> module missing or signature invalid -> rebuild required
+#   1 -> module exists and signature valid   -> nothing required
 #
 # This behavior is intentionally designed for systemd
 # ExecCondition=.
@@ -104,11 +144,12 @@ get_module_path() {
 needs_rebuild() {
     local kver
     local module_path
+    local signer
 
-    kver="$(get_latest_kernel)"
+    kver="$(get_target_kernel)"
     module_path="/lib/modules/$kver/$MODULE_SUBDIR/${MODULE_NAME}.ko"
 
-    echo "🔎 Checking newest installed kernel:"
+    echo "🔎 Fedora default boot kernel:"
     echo "   $kver"
     echo
 
@@ -116,17 +157,44 @@ needs_rebuild() {
     echo "   $module_path"
     echo
 
-    if [[ -f "$module_path" ]]; then
-        echo "✅ Module already exists."
-        echo "ℹ️ Nothing to rebuild."
-
-        return 1
+    if [[ ! -f "$module_path" ]]; then
+        echo "⚠️ Module does not exist."
+        echo "🔨 Rebuild required."
+        return 0
     fi
 
-    echo "⚠️ Module does not exist."
-    echo "🔨 Rebuild required."
+    echo "✅ Module exists."
+    echo
 
-    return 0
+    signer="$(modinfo -F signer "$module_path" 2>/dev/null || true)"
+
+    echo "🔐 Checking module signature..."
+
+    if [[ -z "$signer" ]]; then
+        echo "⚠️ Module is unsigned or its signer cannot be read."
+        echo "🔨 Rebuild/sign required."
+        return 0
+    fi
+
+    echo "   Signer: $signer"
+    echo
+
+    if ! module_signature_is_valid "$module_path"; then
+        echo "⚠️ Module is not signed with the expected certificate."
+        echo
+        echo "Expected signer:"
+        echo "   ${CN_MATCH#CN=}"
+        echo
+        echo "Found signer:"
+        echo "   $signer"
+        echo
+        echo "🔨 Rebuild/sign required."
+        return 0
+    fi
+
+    echo "✅ Module exists and is correctly signed."
+    echo "ℹ️ Nothing to rebuild."
+    return 1
 }
 
 # ============================================================
@@ -221,14 +289,14 @@ rebuild_module() {
     echo "=== 🧰 v4l2loopback rebuild ==="
     echo
 
-    kver="$(get_latest_kernel)"
+    kver="$(get_target_kernel)"
 
     kernel_src="/usr/src/kernels/$kver"
     sign_file="$kernel_src/scripts/sign-file"
     install_path="/lib/modules/$kver/$MODULE_SUBDIR"
     installed_module="$install_path/${MODULE_NAME}.ko"
 
-    echo "🐧 Latest installed kernel-devel:"
+    echo "🐧 Fedora default boot kernel:"
     echo "   $kver"
     echo
 
@@ -237,19 +305,20 @@ rebuild_module() {
     echo
 
     if [[ -f "$installed_module" ]]; then
-        echo "✅ Module already exists."
-        echo
-        echo "📦 Existing module:"
-        echo "   $installed_module"
-        echo
-        echo "ℹ️ Nothing to do."
+        if module_signature_is_valid "$installed_module"; then
+            echo "✅ Existing module is correctly signed."
+            echo "ℹ️ Nothing to rebuild."
+            return 0
+        fi
 
-        return 0
+        echo "⚠️ Existing module is unsigned or signed by another certificate."
+        echo "→ It will be rebuilt, signed and replaced."
+        echo
+    else
+        echo "⚠️ Module does not exist."
+        echo "→ It will be compiled, signed and installed."
+        echo
     fi
-
-    echo "⚠️ Module does not exist."
-    echo "→ It will be compiled, signed and installed."
-    echo
 
     # --------------------------------------------------------
     # Check source repository
@@ -399,12 +468,12 @@ rebuild_module() {
             true
     else
         echo
-        echo "ℹ️ Module installed for a newer kernel."
+        echo "ℹ️ Module installed for the Fedora default boot kernel."
         echo
         echo "Running kernel:"
         echo "   $(uname -r)"
         echo
-        echo "Newest installed kernel:"
+        echo "Default boot kernel:"
         echo "   $kver"
         echo
         echo "Reboot to use it:"
@@ -439,7 +508,7 @@ enable_systemd() {
 
         sudo tee "$SYSTEMD_SERVICE" >/dev/null <<EOF
 [Unit]
-Description=Ensure v4l2loopback exists for newest installed kernel
+Description=Ensure v4l2loopback is available for Fedora default boot kernel
 Documentation=https://github.com/hhlp/v4l2loopback
 After=local-fs.target
 ConditionPathExists=$PROGRAM_PATH
@@ -518,14 +587,14 @@ EOF
     echo
     echo "At boot the service checks:"
     echo
-    echo "   /lib/modules/<latest-kernel>/updates/${MODULE_NAME}.ko"
+    echo "   /lib/modules/<default-boot-kernel>/updates/${MODULE_NAME}.ko"
     echo
-    echo "If the module exists:"
+    echo "If the module exists and is correctly signed:"
     echo
     echo "   → ExecCondition returns 1"
     echo "   → rebuild is skipped"
     echo
-    echo "If the module is missing:"
+    echo "If the module is missing, unsigned, or signed by another key:"
     echo
     echo "   → ExecCondition returns 0"
     echo "   → rebuild is executed"
@@ -872,19 +941,19 @@ Commands:
         MOK enrollment.
 
     needs-rebuild
-        Check whether v4l2loopback.ko exists for the newest
-        installed kernel-devel.
+        Check whether v4l2loopback.ko exists for the Fedora
+        default boot kernel and has the expected signature.
 
         Exit status:
-            0 = module missing, rebuild required
-            1 = module exists, nothing required
+            0 = module missing/invalid signature, rebuild required
+            1 = module exists and signature is valid
 
         Intended primarily for systemd ExecCondition.
 
     rebuild
-        Build, sign and install v4l2loopback only when the
-        module does not already exist for the newest
-        installed kernel-devel.
+        Build, sign and install v4l2loopback for the Fedora
+        default boot kernel when the module is missing or its
+        signature is invalid.
 
     reinstall
         Uninstall, restore source/configuration and rebuild.
@@ -903,12 +972,12 @@ Commands:
 
             $SYSTEMD_SERVICE
 
-        At boot systemd checks whether the module exists.
+        At boot systemd checks the module for the Fedora default boot kernel.
 
-        Missing:
+        Missing or invalid signature:
             rebuild is executed
 
-        Exists:
+        Exists and correctly signed:
             nothing is executed
 
     disable-systemd
