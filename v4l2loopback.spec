@@ -1,5 +1,5 @@
 Name:           v4l2loopback-manager
-Version:        1.0.0
+Version:        1.0.1
 Release:        1%{?dist}
 Summary:        Secure Boot manager for v4l2loopback on Fedora
 
@@ -42,7 +42,7 @@ utility.
 
 %install
 install -Dpm0755 v4l2loopback.sh \
-    %{buildroot}%{_sbindir}/v4l2loopback
+    %{buildroot}%{_bindir}/v4l2loopback
 
 %preun
 # $1 == 0 means final package removal.
@@ -62,7 +62,7 @@ if [ "$1" -eq 0 ]; then
     echo " keys, or dynamically-created systemd unit."
     echo
     echo " If those cleanup commands were not run before this DNF"
-    echo " transaction, /usr/sbin/v4l2loopback will be removed when"
+    echo " transaction, /usr/bin/v4l2loopback will be removed when"
     echo " the transaction completes."
     echo "================================================================"
     echo
@@ -76,10 +76,15 @@ fi
 %doc README.md
 %doc FAQ.md
 %doc TEST.md
-%{_sbindir}/v4l2loopback
+%{_bindir}/v4l2loopback
 
 %changelog
+* Thu Aug 27 2026 hhlp <hhlp@users.noreply.github.com> - 1.0.1-1
+- Use /usr/bin/v4l2loopback as the canonical Fedora executable path
+- Install the manager with %{_bindir}
+- Update generated systemd integration to use /usr/bin/v4l2loopback
+
 * Thu Aug 27 2026 hhlp <hhlp@users.noreply.github.com> - 1.0.0-1
 - Initial COPR package
-- Install management utility as /usr/sbin/v4l2loopback
+- Install management utility as /usr/bin/v4l2loopback
 - Add package-removal cleanup warning

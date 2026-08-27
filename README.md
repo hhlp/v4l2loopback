@@ -120,7 +120,7 @@ v4l2loopback-manager
 and installs the management command as:
 
 ```text
-/usr/sbin/v4l2loopback
+/usr/bin/v4l2loopback
 ```
 
 When the COPR repository is available, install it with:
@@ -134,7 +134,7 @@ Check the installed command:
 
 ```bash
 command -v v4l2loopback
-rpm -qf /usr/sbin/v4l2loopback
+rpm -qf /usr/bin/v4l2loopback
 v4l2loopback help
 ```
 
@@ -144,7 +144,7 @@ installed manually:
 ```bash
 sudo install -m 755 \
     v4l2loopback.sh \
-    /usr/sbin/v4l2loopback
+    /usr/bin/v4l2loopback
 ```
 
 The source file remains named `v4l2loopback.sh`; the installed command
@@ -1081,7 +1081,7 @@ unit shipped and owned by the RPM.
 It does not rebuild unconditionally. It first runs:
 
 ```text
-/usr/sbin/v4l2loopback needs-rebuild
+/usr/bin/v4l2loopback needs-rebuild
 ```
 
 If the module already exists, systemd skips the rebuild.
@@ -1089,7 +1089,7 @@ If the module already exists, systemd skips the rebuild.
 If the module is missing, systemd runs:
 
 ```bash
-/usr/sbin/v4l2loopback rebuild
+/usr/bin/v4l2loopback rebuild
 ```
 
 The script always selects the newest installed `kernel-devel`.
@@ -1168,7 +1168,7 @@ When this command is used by systemd through `ExecCondition=`, exit status `1` i
 You may see output similar to:
 
 ```text
-ExecCondition=/usr/sbin/v4l2loopback needs-rebuild
+ExecCondition=/usr/bin/v4l2loopback needs-rebuild
 (code=exited, status=1/FAILURE)
 
 v4l2loopback-rebuild.service: Skipped due to 'exec-condition'.
@@ -1204,7 +1204,7 @@ Install the management script:
 ```bash
 sudo install -m 755 \
     v4l2loopback.sh \
-    /usr/sbin/v4l2loopback
+    /usr/bin/v4l2loopback
 ```
 
 Enable the automatic systemd check at boot:
@@ -1252,12 +1252,12 @@ The generated service is conceptually equivalent to:
 [Unit]
 Description=Ensure v4l2loopback exists for newest installed kernel
 After=local-fs.target
-ConditionPathExists=/usr/sbin/v4l2loopback
+ConditionPathExists=/usr/bin/v4l2loopback
 
 [Service]
 Type=oneshot
-ExecCondition=/usr/sbin/v4l2loopback needs-rebuild
-ExecStart=/usr/sbin/v4l2loopback rebuild
+ExecCondition=/usr/bin/v4l2loopback needs-rebuild
+ExecStart=/usr/bin/v4l2loopback rebuild
 
 [Install]
 WantedBy=multi-user.target
@@ -1266,8 +1266,8 @@ WantedBy=multi-user.target
 The key lines are:
 
 ```ini
-ExecCondition=/usr/sbin/v4l2loopback needs-rebuild
-ExecStart=/usr/sbin/v4l2loopback rebuild
+ExecCondition=/usr/bin/v4l2loopback needs-rebuild
+ExecStart=/usr/bin/v4l2loopback rebuild
 ```
 
 `ExecCondition=` is evaluated first:
@@ -1389,7 +1389,7 @@ systemctl status v4l2loopback-rebuild.service
 If the module already exists, systemd may show output similar to:
 
 ```text
-ExecCondition=/usr/sbin/v4l2loopback needs-rebuild
+ExecCondition=/usr/bin/v4l2loopback needs-rebuild
 (code=exited, status=1/FAILURE)
 
 v4l2loopback-rebuild.service: Skipped due to 'exec-condition'.
@@ -1483,7 +1483,7 @@ Install the management script:
 ```bash
 sudo install -m 755 \
     v4l2loopback.sh \
-    /usr/sbin/v4l2loopback
+    /usr/bin/v4l2loopback
 ```
 
 Clone the source:
@@ -2397,7 +2397,7 @@ automatically delete locally built modules, MOK state, signing keys, the
 source repository, or the dynamically generated systemd service.
 
 Do not postpone the manager commands until after `dnf remove`, because
-`/usr/sbin/v4l2loopback` is removed with the package.
+`/usr/bin/v4l2loopback` is removed with the package.
 
 ---
 

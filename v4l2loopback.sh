@@ -43,7 +43,7 @@ CONFIG_AUTOLOAD="/etc/modules-load.d/${MODULE_NAME}.conf"
 
 CN_MATCH="CN=V4L2Loopback Module Signing"
 
-PROGRAM_PATH="/usr/sbin/v4l2loopback"
+PROGRAM_PATH="/usr/bin/v4l2loopback"
 
 SYSTEMD_SERVICE_NAME="v4l2loopback-rebuild.service"
 SYSTEMD_SERVICE="/etc/systemd/system/$SYSTEMD_SERVICE_NAME"

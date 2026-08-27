@@ -64,7 +64,7 @@ v4l2loopback-manager
 and the installed management command is:
 
 ```text
-/usr/sbin/v4l2loopback
+/usr/bin/v4l2loopback
 ```
 
 Install from COPR with:
@@ -78,7 +78,7 @@ Verify the RPM installation:
 
 ```bash
 rpm -q v4l2loopback-manager
-rpm -qf /usr/sbin/v4l2loopback
+rpm -qf /usr/bin/v4l2loopback
 command -v v4l2loopback
 v4l2loopback help
 ```
@@ -88,7 +88,7 @@ For testing directly from the source tree instead of the RPM:
 ```bash
 sudo install -m 755 \
     v4l2loopback.sh \
-    /usr/sbin/v4l2loopback
+    /usr/bin/v4l2loopback
 ```
 
 The source file is named `v4l2loopback.sh`, while the installed command
@@ -1025,7 +1025,7 @@ It is not a static RPM-owned systemd unit.
 It does not rebuild unconditionally. It first runs:
 
 ```text
-/usr/sbin/v4l2loopback needs-rebuild
+/usr/bin/v4l2loopback needs-rebuild
 ```
 
 If the module already exists, systemd skips the rebuild.
@@ -1112,7 +1112,7 @@ When this command is used by systemd through `ExecCondition=`, exit status `1` i
 You may see output similar to:
 
 ```text
-ExecCondition=/usr/sbin/v4l2loopback needs-rebuild
+ExecCondition=/usr/bin/v4l2loopback needs-rebuild
 (code=exited, status=1/FAILURE)
 
 v4l2loopback-rebuild.service: Skipped due to 'exec-condition'.
@@ -1148,7 +1148,7 @@ package:
 
 ```bash
 rpm -q v4l2loopback-manager
-rpm -qf /usr/sbin/v4l2loopback
+rpm -qf /usr/bin/v4l2loopback
 ```
 
 For source-tree testing only, it can be installed manually with:
@@ -1156,7 +1156,7 @@ For source-tree testing only, it can be installed manually with:
 ```bash
 sudo install -m 755 \
     v4l2loopback.sh \
-    /usr/sbin/v4l2loopback
+    /usr/bin/v4l2loopback
 ```
 
 Enable the automatic systemd check at boot:
@@ -1204,12 +1204,12 @@ The generated service is conceptually equivalent to:
 [Unit]
 Description=Ensure v4l2loopback exists for newest installed kernel
 After=local-fs.target
-ConditionPathExists=/usr/sbin/v4l2loopback
+ConditionPathExists=/usr/bin/v4l2loopback
 
 [Service]
 Type=oneshot
-ExecCondition=/usr/sbin/v4l2loopback needs-rebuild
-ExecStart=/usr/sbin/v4l2loopback rebuild
+ExecCondition=/usr/bin/v4l2loopback needs-rebuild
+ExecStart=/usr/bin/v4l2loopback rebuild
 
 [Install]
 WantedBy=multi-user.target
@@ -1218,8 +1218,8 @@ WantedBy=multi-user.target
 The key lines are:
 
 ```ini
-ExecCondition=/usr/sbin/v4l2loopback needs-rebuild
-ExecStart=/usr/sbin/v4l2loopback rebuild
+ExecCondition=/usr/bin/v4l2loopback needs-rebuild
+ExecStart=/usr/bin/v4l2loopback rebuild
 ```
 
 `ExecCondition=` is evaluated first:
@@ -1341,7 +1341,7 @@ systemctl status v4l2loopback-rebuild.service
 If the module already exists, systemd may show output similar to:
 
 ```text
-ExecCondition=/usr/sbin/v4l2loopback needs-rebuild
+ExecCondition=/usr/bin/v4l2loopback needs-rebuild
 (code=exited, status=1/FAILURE)
 
 v4l2loopback-rebuild.service: Skipped due to 'exec-condition'.
@@ -1440,7 +1440,7 @@ sudo dnf install v4l2loopback-manager
 Verify the installed command:
 
 ```bash
-rpm -qf /usr/sbin/v4l2loopback
+rpm -qf /usr/bin/v4l2loopback
 v4l2loopback help
 ```
 
@@ -2267,7 +2267,7 @@ Verify that the RPM-owned command was removed:
 
 ```bash
 rpm -q v4l2loopback-manager
-test ! -e /usr/sbin/v4l2loopback
+test ! -e /usr/bin/v4l2loopback
 ```
 
 The RPM removal itself should not silently delete machine-local state such as
