@@ -53,33 +53,46 @@ rpm -q kernel-devel
 
 ---
 
-# 2. Script installation
+# 2. Installation
 
-The README assumes that the script is installed as:
+For RPM/COPR testing, the package is:
 
 ```text
-/usr/sbin/v4l2loopback.sh
+v4l2loopback-manager
 ```
 
-Install it with:
+and the installed management command is:
+
+```text
+/usr/sbin/v4l2loopback
+```
+
+Install from COPR with:
+
+```bash
+sudo dnf copr enable hhlp/v4l2loopback
+sudo dnf install v4l2loopback-manager
+```
+
+Verify the RPM installation:
+
+```bash
+rpm -q v4l2loopback-manager
+rpm -qf /usr/sbin/v4l2loopback
+command -v v4l2loopback
+v4l2loopback help
+```
+
+For testing directly from the source tree instead of the RPM:
 
 ```bash
 sudo install -m 755 \
     v4l2loopback.sh \
-    /usr/sbin/v4l2loopback.sh
+    /usr/sbin/v4l2loopback
 ```
 
-Check it:
-
-```bash
-ls -l /usr/sbin/v4l2loopback.sh
-```
-
-Show help:
-
-```bash
-sudo /usr/sbin/v4l2loopback.sh help
-```
+The source file is named `v4l2loopback.sh`, while the installed command
+intentionally has no `.sh` suffix.
 
 ---
 
@@ -101,20 +114,20 @@ help
 General syntax:
 
 ```bash
-sudo /usr/sbin/v4l2loopback.sh <command>
+sudo v4l2loopback <command>
 ```
 
 Examples:
 
 ```bash
-sudo /usr/sbin/v4l2loopback.sh genkey
-sudo /usr/sbin/v4l2loopback.sh needs-rebuild
-sudo /usr/sbin/v4l2loopback.sh rebuild
-sudo /usr/sbin/v4l2loopback.sh reinstall
-sudo /usr/sbin/v4l2loopback.sh uninstall
-sudo /usr/sbin/v4l2loopback.sh enable-systemd
-sudo /usr/sbin/v4l2loopback.sh disable-systemd
-sudo /usr/sbin/v4l2loopback.sh help
+sudo v4l2loopback genkey
+sudo v4l2loopback needs-rebuild
+sudo v4l2loopback rebuild
+sudo v4l2loopback reinstall
+sudo v4l2loopback uninstall
+sudo v4l2loopback enable-systemd
+sudo v4l2loopback disable-systemd
+sudo v4l2loopback help
 ```
 
 ---
@@ -285,7 +298,7 @@ The script therefore supports generating a dedicated MOK signing key.
 Run:
 
 ```bash
-sudo /usr/sbin/v4l2loopback.sh genkey
+sudo v4l2loopback genkey
 ```
 
 The script creates:
@@ -471,7 +484,7 @@ sudo reboot
 Run:
 
 ```bash
-sudo /usr/sbin/v4l2loopback.sh rebuild
+sudo v4l2loopback rebuild
 ```
 
 The script determines the newest installed kernel and constructs this path:
@@ -816,7 +829,7 @@ v4l2-ctl \
 Run:
 
 ```bash
-sudo /usr/sbin/v4l2loopback.sh reinstall
+sudo v4l2loopback reinstall
 ```
 
 The reinstall process performs:
@@ -885,7 +898,7 @@ unless you deliberately want to create and enroll a new signing key.
 Run:
 
 ```bash
-sudo /usr/sbin/v4l2loopback.sh uninstall
+sudo v4l2loopback uninstall
 ```
 
 The script:
@@ -1006,10 +1019,13 @@ The service is:
 /etc/systemd/system/v4l2loopback-rebuild.service
 ```
 
+This unit is generated dynamically by `v4l2loopback enable-systemd`.
+It is not a static RPM-owned systemd unit.
+
 It does not rebuild unconditionally. It first runs:
 
 ```text
-/usr/sbin/v4l2loopback.sh needs-rebuild
+/usr/sbin/v4l2loopback needs-rebuild
 ```
 
 If the module already exists, systemd skips the rebuild.
@@ -1017,7 +1033,7 @@ If the module already exists, systemd skips the rebuild.
 If the module is missing, systemd runs:
 
 ```bash
-sudo /usr/sbin/v4l2loopback.sh rebuild
+sudo v4l2loopback rebuild
 ```
 
 The script always selects the newest installed `kernel-devel`.
@@ -1029,7 +1045,7 @@ The script always selects the newest installed `kernel-devel`.
 Run:
 
 ```bash
-sudo /usr/sbin/v4l2loopback.sh needs-rebuild
+sudo v4l2loopback needs-rebuild
 ```
 
 This command determines the newest installed `kernel-devel` and checks:
@@ -1071,7 +1087,7 @@ An existing `.ko` is trusted as already prepared by this workflow and is left un
 Example:
 
 ```bash
-sudo /usr/sbin/v4l2loopback.sh needs-rebuild
+sudo v4l2loopback needs-rebuild
 echo $?
 ```
 
@@ -1096,7 +1112,7 @@ When this command is used by systemd through `ExecCondition=`, exit status `1` i
 You may see output similar to:
 
 ```text
-ExecCondition=/usr/sbin/v4l2loopback.sh needs-rebuild
+ExecCondition=/usr/sbin/v4l2loopback needs-rebuild
 (code=exited, status=1/FAILURE)
 
 v4l2loopback-rebuild.service: Skipped due to 'exec-condition'.
@@ -1127,18 +1143,26 @@ It also does not independently prove that an arbitrary existing `.ko` is signed;
 
 # 31. Installation and systemd integration
 
-Install the management script:
+With the RPM installed, verify that the management command belongs to the
+package:
+
+```bash
+rpm -q v4l2loopback-manager
+rpm -qf /usr/sbin/v4l2loopback
+```
+
+For source-tree testing only, it can be installed manually with:
 
 ```bash
 sudo install -m 755 \
     v4l2loopback.sh \
-    /usr/local/bin/v4l2loopback.sh
+    /usr/sbin/v4l2loopback
 ```
 
 Enable the automatic systemd check at boot:
 
 ```bash
-sudo /usr/local/bin/v4l2loopback.sh enable-systemd
+sudo v4l2loopback enable-systemd
 ```
 
 This manages the following oneshot unit:
@@ -1180,12 +1204,12 @@ The generated service is conceptually equivalent to:
 [Unit]
 Description=Ensure v4l2loopback exists for newest installed kernel
 After=local-fs.target
-ConditionPathExists=/usr/local/bin/v4l2loopback.sh
+ConditionPathExists=/usr/sbin/v4l2loopback
 
 [Service]
 Type=oneshot
-ExecCondition=/usr/local/bin/v4l2loopback.sh needs-rebuild
-ExecStart=/usr/local/bin/v4l2loopback.sh rebuild
+ExecCondition=/usr/sbin/v4l2loopback needs-rebuild
+ExecStart=/usr/sbin/v4l2loopback rebuild
 
 [Install]
 WantedBy=multi-user.target
@@ -1194,8 +1218,8 @@ WantedBy=multi-user.target
 The key lines are:
 
 ```ini
-ExecCondition=/usr/local/bin/v4l2loopback.sh needs-rebuild
-ExecStart=/usr/local/bin/v4l2loopback.sh rebuild
+ExecCondition=/usr/sbin/v4l2loopback needs-rebuild
+ExecStart=/usr/sbin/v4l2loopback rebuild
 ```
 
 `ExecCondition=` is evaluated first:
@@ -1237,7 +1261,7 @@ The complete boot-time flow is:
         skip ExecStart          ExecStart
                                    │
                                    ▼
-                    v4l2loopback.sh rebuild
+                    v4l2loopback rebuild
                                    │
                          ┌─────────┼─────────┐
                          ▼         ▼         ▼
@@ -1268,7 +1292,7 @@ systemctl is-enabled v4l2loopback-rebuild.service
 You can manually run the same condition used by systemd:
 
 ```bash
-sudo /usr/local/bin/v4l2loopback.sh needs-rebuild
+sudo v4l2loopback needs-rebuild
 echo $?
 ```
 
@@ -1317,7 +1341,7 @@ systemctl status v4l2loopback-rebuild.service
 If the module already exists, systemd may show output similar to:
 
 ```text
-ExecCondition=/usr/local/bin/v4l2loopback.sh needs-rebuild
+ExecCondition=/usr/sbin/v4l2loopback needs-rebuild
 (code=exited, status=1/FAILURE)
 
 v4l2loopback-rebuild.service: Skipped due to 'exec-condition'.
@@ -1345,7 +1369,7 @@ journalctl -b -u v4l2loopback-rebuild.service
 Disable the automatic boot-time check and remove the unit:
 
 ```bash
-sudo /usr/local/bin/v4l2loopback.sh disable-systemd
+sudo v4l2loopback disable-systemd
 ```
 
 The operation is state-aware and idempotent:
@@ -1384,8 +1408,8 @@ More specifically, `disable-systemd`:
 After disabling systemd integration, the module can still be checked or rebuilt manually:
 
 ```bash
-sudo /usr/local/bin/v4l2loopback.sh needs-rebuild
-sudo /usr/local/bin/v4l2loopback.sh rebuild
+sudo v4l2loopback needs-rebuild
+sudo v4l2loopback rebuild
 ```
 
 ---
@@ -1406,12 +1430,18 @@ sudo dnf install -y \
     v4l-utils
 ```
 
-Install the management script:
+Install the manager package:
 
 ```bash
-sudo install -m 755 \
-    v4l2loopback.sh \
-    /usr/sbin/v4l2loopback.sh
+sudo dnf copr enable hhlp/v4l2loopback
+sudo dnf install v4l2loopback-manager
+```
+
+Verify the installed command:
+
+```bash
+rpm -qf /usr/sbin/v4l2loopback
+v4l2loopback help
 ```
 
 Clone the source:
@@ -1425,7 +1455,7 @@ sudo git clone \
 Generate and request enrollment of the signing key:
 
 ```bash
-sudo /usr/sbin/v4l2loopback.sh genkey
+sudo v4l2loopback genkey
 ```
 
 Reboot:
@@ -1439,13 +1469,13 @@ Complete MOK enrollment.
 After returning to Fedora:
 
 ```bash
-sudo /usr/sbin/v4l2loopback.sh rebuild
+sudo v4l2loopback rebuild
 ```
 
 Optionally enable the automatic boot-time check:
 
 ```bash
-sudo /usr/sbin/v4l2loopback.sh enable-systemd
+sudo v4l2loopback enable-systemd
 ```
 
 Then verify:
@@ -1509,7 +1539,7 @@ rpm -q kernel-devel
 and run:
 
 ```bash
-sudo /usr/sbin/v4l2loopback.sh rebuild
+sudo v4l2loopback rebuild
 ```
 
 Two cases are possible.
@@ -1555,7 +1585,7 @@ sudo reboot
 The easiest method is:
 
 ```bash
-sudo /usr/sbin/v4l2loopback.sh needs-rebuild
+sudo v4l2loopback needs-rebuild
 echo $?
 ```
 
@@ -1742,7 +1772,7 @@ because the configuration requires a single textual line.
 Check the condition manually:
 
 ```bash
-sudo /usr/sbin/v4l2loopback.sh needs-rebuild
+sudo v4l2loopback needs-rebuild
 echo $?
 ```
 
@@ -1784,7 +1814,7 @@ systemctl is-enabled v4l2loopback-rebuild.service
 Enable it again with:
 
 ```bash
-sudo /usr/sbin/v4l2loopback.sh enable-systemd
+sudo v4l2loopback enable-systemd
 ```
 
 ## No `kernel-devel` installed
@@ -1810,7 +1840,7 @@ rpm -q kernel-devel
 Then:
 
 ```bash
-sudo /usr/sbin/v4l2loopback.sh rebuild
+sudo v4l2loopback rebuild
 ```
 
 ---
@@ -1834,7 +1864,7 @@ sudo git clone \
 Then:
 
 ```bash
-sudo /usr/sbin/v4l2loopback.sh rebuild
+sudo v4l2loopback rebuild
 ```
 
 ---
@@ -1857,7 +1887,7 @@ v4l.der
 If they are missing:
 
 ```bash
-sudo /usr/sbin/v4l2loopback.sh genkey
+sudo v4l2loopback genkey
 ```
 
 Complete MOK enrollment after reboot before relying on the signed module under Secure Boot.
@@ -2057,7 +2087,7 @@ dmesg | grep -i v4l2loopback
 Check whether a rebuild is required:
 
 ```bash
-sudo /usr/sbin/v4l2loopback.sh needs-rebuild
+sudo v4l2loopback needs-rebuild
 echo $?
 ```
 
@@ -2089,7 +2119,7 @@ A typical installation looks like:
 /
 ├── usr/
 │   ├── sbin/
-│   │   └── v4l2loopback.sh
+│   │   └── v4l2loopback
 │   │
 │   └── src/
 │       ├── kernels/
@@ -2217,7 +2247,38 @@ The existence test is deliberately simple: the service checks whether the expect
 
 ---
 
-# 46. Project
+# 46. RPM removal test
+
+Before removing the RPM, test the cleanup commands while the management
+command still exists:
+
+```bash
+sudo v4l2loopback uninstall
+sudo v4l2loopback disable-systemd
+```
+
+Then remove the package:
+
+```bash
+sudo dnf remove v4l2loopback-manager
+```
+
+Verify that the RPM-owned command was removed:
+
+```bash
+rpm -q v4l2loopback-manager
+test ! -e /usr/sbin/v4l2loopback
+```
+
+The RPM removal itself should not silently delete machine-local state such as
+locally built kernel modules, MOK enrollment, signing keys, the cloned source
+repository, or the dynamically generated systemd unit. The `%preun` scriptlet
+may print a reminder telling the administrator to run the cleanup commands
+before final package removal.
+
+---
+
+# 47. Project
 
 This script is a Fedora-oriented helper around the upstream:
 

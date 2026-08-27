@@ -43,6 +43,8 @@ CONFIG_AUTOLOAD="/etc/modules-load.d/${MODULE_NAME}.conf"
 
 CN_MATCH="CN=V4L2Loopback Module Signing"
 
+PROGRAM_PATH="/usr/sbin/v4l2loopback"
+
 SYSTEMD_SERVICE_NAME="v4l2loopback-rebuild.service"
 SYSTEMD_SERVICE="/etc/systemd/system/$SYSTEMD_SERVICE_NAME"
 
@@ -438,15 +440,15 @@ enable_systemd() {
         sudo tee "$SYSTEMD_SERVICE" >/dev/null <<EOF
 [Unit]
 Description=Ensure v4l2loopback exists for newest installed kernel
-Documentation=https://github.com/v4l2loopback/v4l2loopback
+Documentation=https://github.com/hhlp/v4l2loopback
 After=local-fs.target
-ConditionPathExists=/usr/sbin/v4l2loopback.sh
+ConditionPathExists=$PROGRAM_PATH
 
 [Service]
 Type=oneshot
 
-ExecCondition=/usr/sbin/v4l2loopback.sh needs-rebuild
-ExecStart=/usr/sbin/v4l2loopback.sh rebuild
+ExecCondition=$PROGRAM_PATH needs-rebuild
+ExecStart=$PROGRAM_PATH rebuild
 
 [Install]
 WantedBy=multi-user.target
@@ -923,6 +925,9 @@ Module options:
 
 Source:
     $REPO_DIR
+
+Installed command:
+    $PROGRAM_PATH
 
 Systemd service:
     $SYSTEMD_SERVICE
