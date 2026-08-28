@@ -1,0 +1,231 @@
+name: RPM Build
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "v4l2loopback.spec"
+      - "v4l2loopback.sh"
+      - "README.md"
+      - "FAQ.md"
+      - "TEST.md"
+      - "LICENSE"
+      - ".github/workflows/rpm-build.yml"
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "v4l2loopback.spec"
+      - "v4l2loopback.sh"
+      - "README.md"
+      - "FAQ.md"
+      - "TEST.md"
+      - "LICENSE"
+      - ".github/workflows/rpm-build.yml"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rpm-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rpm-build:
+    name: Build Fedora RPM
+    runs-on: ubuntu-latest
+
+    container:
+      image: fedora:latest
+
+    steps:
+      - name: Install RPM build tools
+        run: |
+          dnf install -y \
+              git \
+              rpm-build \
+              rpmdevtools \
+              tar \
+              gzip
+
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Validate SPEC syntax
+        run: |
+          rpmspec -P v4l2loopback.spec >/dev/null
+
+      - name: Show package metadata
+        run: |
+          rpmspec -q \
+              --qf '%{NAME} %{VERSION}-%{RELEASE} %{ARCH}\n' \
+              v4l2loopback.spec
+
+      - name: Prepare RPM build tree
+        run: |
+          set -euo pipefail
+
+          VERSION="$(
+              rpmspec -q \
+                  --qf '%{VERSION}\n' \
+                  v4l2loopback.spec |
+                  head -n1
+          )"
+
+          echo "Building version: ${VERSION}"
+
+          RPM_TOPDIR="${HOME}/rpmbuild"
+
+          mkdir -p \
+              "${RPM_TOPDIR}/BUILD" \
+              "${RPM_TOPDIR}/BUILDROOT" \
+              "${RPM_TOPDIR}/RPMS" \
+              "${RPM_TOPDIR}/SOURCES" \
+              "${RPM_TOPDIR}/SPECS" \
+              "${RPM_TOPDIR}/SRPMS"
+
+          cp v4l2loopback.spec \
+              "${RPM_TOPDIR}/SPECS/v4l2loopback.spec"
+
+          git archive \
+              --format=tar \
+              --prefix="v4l2loopback-${VERSION}/" \
+              HEAD |
+              gzip -n \
+                  > "${RPM_TOPDIR}/SOURCES/v${VERSION}.tar.gz"
+
+          echo
+          echo "Source archive:"
+          ls -lh "${RPM_TOPDIR}/SOURCES/v${VERSION}.tar.gz"
+
+          echo
+          echo "Archive contents:"
+          tar -tzf "${RPM_TOPDIR}/SOURCES/v${VERSION}.tar.gz" |
+              head -n 30
+
+      - name: Build source RPM
+        run: |
+          set -euo pipefail
+
+          rpmbuild \
+              --define "_topdir ${HOME}/rpmbuild" \
+              -bs \
+              "${HOME}/rpmbuild/SPECS/v4l2loopback.spec"
+
+      - name: Build binary RPM
+        run: |
+          set -euo pipefail
+
+          rpmbuild \
+              --define "_topdir ${HOME}/rpmbuild" \
+              -bb \
+              "${HOME}/rpmbuild/SPECS/v4l2loopback.spec"
+
+      - name: Rebuild from source RPM
+        run: |
+          set -euo pipefail
+
+          SRPM="$(
+              find "${HOME}/rpmbuild/SRPMS" \
+                  -type f \
+                  -name '*.src.rpm' \
+                  -print \
+                  -quit
+          )"
+
+          if [[ -z "${SRPM}" ]]; then
+              echo "ERROR: source RPM was not created."
+              exit 1
+          fi
+
+          echo "Rebuilding:"
+          echo "  ${SRPM}"
+
+          REBUILD_TOPDIR="${HOME}/rpmbuild-rebuild"
+
+          mkdir -p \
+              "${REBUILD_TOPDIR}/BUILD" \
+              "${REBUILD_TOPDIR}/BUILDROOT" \
+              "${REBUILD_TOPDIR}/RPMS" \
+              "${REBUILD_TOPDIR}/SOURCES" \
+              "${REBUILD_TOPDIR}/SPECS" \
+              "${REBUILD_TOPDIR}/SRPMS"
+
+          rpmbuild \
+              --define "_topdir ${REBUILD_TOPDIR}" \
+              --rebuild \
+              "${SRPM}"
+
+      - name: Inspect RPM
+        run: |
+          set -euo pipefail
+
+          RPM="$(
+              find "${HOME}/rpmbuild/RPMS" \
+                  -type f \
+                  -name '*.rpm' \
+                  -print \
+                  -quit
+          )"
+
+          if [[ -z "${RPM}" ]]; then
+              echo "ERROR: binary RPM was not created."
+              exit 1
+          fi
+
+          echo "RPM:"
+          echo "  ${RPM}"
+          echo
+
+          rpm -qpi "${RPM}"
+
+          echo
+          echo "Package contents:"
+          rpm -qlp "${RPM}"
+
+      - name: Verify manager executable
+        run: |
+          set -euo pipefail
+
+          RPM="$(
+              find "${HOME}/rpmbuild/RPMS" \
+                  -type f \
+                  -name '*.rpm' \
+                  -print \
+                  -quit
+          )"
+
+          rpm -qlp "${RPM}" |
+              grep -Fx '/usr/bin/v4l2loopback'
+
+      - name: Collect build artifacts
+        run: |
+          set -euo pipefail
+
+          mkdir -p "${GITHUB_WORKSPACE}/artifacts"
+
+          find "${HOME}/rpmbuild/SRPMS" \
+              -type f \
+              -name '*.src.rpm' \
+              -exec cp -v {} "${GITHUB_WORKSPACE}/artifacts/" \;
+
+          find "${HOME}/rpmbuild/RPMS" \
+              -type f \
+              -name '*.rpm' \
+              -exec cp -v {} "${GITHUB_WORKSPACE}/artifacts/" \;
+
+          echo
+          echo "Artifacts:"
+          ls -lh "${GITHUB_WORKSPACE}/artifacts"
+
+      - name: Upload RPM artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: fedora-rpm
+          path: artifacts/*.rpm
+          if-no-files-found: error
+          retention-days: 7
