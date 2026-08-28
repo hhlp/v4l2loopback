@@ -121,16 +121,25 @@ awk '
     }
 ' "$CHANGELOG" > "$UNRELEASED_BODY"
 
-if ! grep -Eq '^- ' "$UNRELEASED_BODY"; then
+if ! grep -qE '^[[:space:]]*[-*+][[:space:]]+' "$UNRELEASED_BODY"; then
     die "CHANGELOG.md [Unreleased] contains no release entries"
 fi
 
 # ------------------------------------------------------------
 # Convert Markdown release bullets into RPM changelog bullets.
 #
-# Markdown:
+# Supported Markdown bullets:
 #
-# - Changed target kernel selection to use Fedora's configured default
+# - Entry
+# * Entry
+# + Entry
+#
+# Wrapped Markdown lines are joined into a single RPM changelog
+# entry.
+#
+# Example:
+#
+# * Changed target kernel selection to use Fedora's configured default
 #   boot kernel.
 #
 # becomes:
@@ -146,9 +155,13 @@ awk '
         }
     }
 
-    /^- / {
+    /^[[:space:]]*[-*+][[:space:]]+/ {
         flush_item()
-        item = substr($0, 3)
+
+        line = $0
+        sub(/^[[:space:]]*[-*+][[:space:]]+/, "", line)
+
+        item = line
         next
     }
 
@@ -156,11 +169,7 @@ awk '
         line = $0
         sub(/^[[:space:]]+/, "", line)
 
-        if (
-            line != "" &&
-            line !~ /^```/ &&
-            line !~ /^###/
-        ) {
+        if (line != "" && line !~ /^```/ && line !~ /^###/) {
             item = item " " line
         }
 
