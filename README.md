@@ -1,32 +1,162 @@
 # 🎥 v4l2loopback Manager for Fedora
 
-`v4l2loopback-manager` builds, signs, installs and maintains the upstream
-`v4l2loopback` kernel module on Fedora systems, including systems with Secure Boot.
+> Secure Boot-aware management of the upstream `v4l2loopback` kernel module on Fedora.
 
+[![Fedora](https://img.shields.io/badge/Fedora-supported-blue?logo=fedora&logoColor=white)](https://fedoraproject.org/)
+[![COPR](https://img.shields.io/badge/COPR-hhlp%2Fv4l2loopback-blue)](https://copr.fedorainfracloud.org/coprs/hhlp/v4l2loopback/)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/badge/release-v1.0.2-blue)](https://github.com/hhlp/v4l2loopback/releases/tag/v1.0.2)
+
+`v4l2loopback-manager` builds, signs, installs, verifies, rebuilds, and removes the upstream [`v4l2loopback`](https://github.com/v4l2loopback/v4l2loopback) kernel module on Fedora systems, including systems with **UEFI Secure Boot enabled**.
+
+The kernel module itself is **not distributed by this RPM**. It is built locally from the upstream source for Fedora's configured default boot kernel.
+
+---
+
+## ✨ Features
+
+- Builds `v4l2loopback` locally for the Fedora default boot kernel.
+- Detects the target kernel using `grubby --default-kernel`.
+- Supports UEFI Secure Boot using a Machine Owner Key (MOK).
+- Signs `v4l2loopback.ko` using the kernel `sign-file` utility.
+- Verifies both module existence and expected certificate signer.
+- Rebuilds only when the module is missing or has an invalid signature.
+- Provides optional systemd integration for automatic boot-time verification.
+- Keeps module options persistent through `modprobe.d`.
+- Supports clean module uninstall and systemd removal.
+- Designed for Fedora RPM/COPR installation.
+
+---
+
+## 🚀 Quick Start
+
+### Install from COPR
+
+```bash
+sudo dnf copr enable hhlp/v4l2loopback
+sudo dnf install v4l2loopback-manager
+```
+
+Verify the installation:
+
+```bash
+rpm -q v4l2loopback-manager
+command -v v4l2loopback
+v4l2loopback help
+```
+
+Generate the Secure Boot signing key:
+
+```bash
+sudo v4l2loopback genkey
+```
+
+After enrolling the MOK and rebooting, build and install the module:
+
+```bash
+sudo v4l2loopback rebuild
+```
+
+Optional automatic boot-time verification:
+
+```bash
+sudo v4l2loopback enable-systemd
+```
+
+---
+
+## 🏗️ How It Works
+
+The RPM provides the **manager**, not a precompiled kernel module.
+
+```text
+                    Fedora system
+                         │
+                         ▼
+              v4l2loopback-manager
+                         │
+          ┌──────────────┼──────────────┐
+          │              │              │
+          ▼              ▼              ▼
+    default kernel   Secure Boot     upstream source
+       grubby            MOK        v4l2loopback.git
+          │              │              │
+          └──────────────┼──────────────┘
+                         ▼
+                  build module
+                         │
+                         ▼
+                 sign module
+                         │
+                         ▼
+       /lib/modules/<kernel>/updates/
+                 v4l2loopback.ko
+                         │
+                         ▼
+                      depmod
+```
+
+At boot, the optional systemd service performs a simple decision:
+
+```text
+             Fedora default boot kernel
+                        │
+                        ▼
+              v4l2loopback.ko
+                        │
+                 ┌──────┴──────┐
+                 │             │
+              missing        exists
+                 │             │
+                 │             ▼
+                 │        check signer
+                 │         ┌───┴───┐
+                 │         │       │
+                 │       valid   invalid
+                 │         │       │
+                 ▼         ▼       ▼
+              rebuild     skip   rebuild
+```
+
+---
 
 <!-- TOC START -->
-## Table of Contents
+## 📚 Table of Contents
 
-- [Version 1.0.2 design](#version-102-design)
+- [Features](#️-features)
+- [Quick Start](#-quick-start)
+- [How It Works](#️-how-it-works)
+- [Version 1.0.2 Design](#version-102-design)
 - [Requirements](#requirements)
-- [RPM / COPR installation](#rpm-copr-installation)
+- [RPM / COPR Installation](#rpm--copr-installation)
 - [Commands](#commands)
-- [Secure Boot key](#secure-boot-key)
-- [Source tree](#source-tree)
-- [Kernel selection](#kernel-selection)
-- [Rebuild decision](#rebuild-decision)
-- [systemd integration](#systemd-integration)
-- [Persistent module configuration](#persistent-module-configuration)
+- [Secure Boot Key](#secure-boot-key)
+- [Source Tree](#source-tree)
+- [Kernel Selection](#kernel-selection)
+- [Rebuild Decision](#rebuild-decision)
+- [systemd Integration](#systemd-integration)
+- [Persistent Module Configuration](#persistent-module-configuration)
 - [Verification](#verification)
-- [Kernel updates](#kernel-updates)
+- [Kernel Updates](#kernel-updates)
 - [Removal](#removal)
+- [Documentation](#documentation)
+- [License](#license)
 
 <!-- TOC END -->
 
-## Version 1.0.2 design
+---
 
-The manager deliberately has no DNF hook and no systemd timer. The optional
-`v4l2loopback-rebuild.service` is a oneshot service run at boot.
+## Version 1.0.2 Design
+
+The manager deliberately has **no DNF hook and no systemd timer**.
+
+The optional:
+
+```text
+v4l2loopback-rebuild.service
+```
+
+is a oneshot service evaluated at boot.
 
 The target kernel is **the Fedora default boot kernel**, determined with:
 
@@ -34,8 +164,14 @@ The target kernel is **the Fedora default boot kernel**, determined with:
 sudo grubby --default-kernel
 ```
 
-The same target is used by both `needs-rebuild` and `rebuild`. The manager does
-not simply choose the numerically newest installed `kernel-devel`.
+The same target is used by both:
+
+```text
+needs-rebuild
+rebuild
+```
+
+The manager does **not** simply choose the numerically newest installed `kernel-devel`.
 
 For the target kernel it expects:
 
@@ -48,37 +184,64 @@ For the target kernel it expects:
 1. The module exists.
 2. `modinfo -F signer` contains `V4L2Loopback Module Signing`.
 
-Its exit status is intentionally suitable for systemd `ExecCondition=`:
+Its exit status is intentionally designed for systemd `ExecCondition=`:
 
 ```text
-0 = module missing, unsigned, unreadable, or signed by another certificate
-    -> rebuild required
+0 = module missing, unsigned, unreadable,
+    or signed by another certificate
+    → rebuild required
 
 1 = module exists and has the expected signer
-    -> no rebuild required
+    → no rebuild required
 ```
+
+> **Important:** exit status `1` from `needs-rebuild` is not an application failure. It means the systemd condition is false because the module is already valid.
+
+---
 
 ## Requirements
 
+The RPM installs the required runtime dependencies automatically.
+
+For a manual/source installation, the required Fedora packages are:
+
 ```bash
 sudo dnf install -y \
-    git gcc make kernel-devel openssl mokutil dracut kmod systemd grubby
+    git \
+    gcc \
+    make \
+    kernel-devel \
+    openssl \
+    mokutil \
+    dracut \
+    kmod \
+    systemd \
+    grubby
 ```
 
-Optional diagnostics:
+Optional diagnostic tools:
 
 ```bash
 sudo dnf install -y v4l-utils ShellCheck
 ```
 
-## RPM / COPR installation
+---
+
+## RPM / COPR Installation
+
+Enable the COPR repository:
 
 ```bash
 sudo dnf copr enable hhlp/v4l2loopback
+```
+
+Install:
+
+```bash
 sudo dnf install v4l2loopback-manager
 ```
 
-The RPM installs:
+The RPM installs the manager as:
 
 ```text
 /usr/bin/v4l2loopback
@@ -93,7 +256,35 @@ command -v v4l2loopback
 v4l2loopback help
 ```
 
+### What the RPM installs
+
+The RPM packages the management utility and documentation.
+
+It deliberately does **not** ship a precompiled `v4l2loopback.ko`.
+
+```text
+RPM
+ │
+ ├── /usr/bin/v4l2loopback
+ ├── README.md
+ ├── FAQ.md
+ ├── TEST.md
+ └── LICENSE
+
+v4l2loopback.ko
+      ▲
+      │
+built locally for the
+Fedora default boot kernel
+```
+
+This avoids coupling the package to one particular Fedora kernel build.
+
+---
+
 ## Commands
+
+Available commands:
 
 ```text
 genkey
@@ -112,7 +303,15 @@ General syntax:
 sudo v4l2loopback <command>
 ```
 
-## Secure Boot key
+Display built-in help:
+
+```bash
+v4l2loopback help
+```
+
+---
+
+## Secure Boot Key
 
 Generate the project MOK:
 
@@ -120,7 +319,7 @@ Generate the project MOK:
 sudo v4l2loopback genkey
 ```
 
-Files:
+The manager uses:
 
 ```text
 /var/lib/shim-signed/mok/v4l.key
@@ -133,6 +332,14 @@ Certificate subject:
 CN=V4L2Loopback Module Signing
 ```
 
+The private key:
+
+```text
+/var/lib/shim-signed/mok/v4l.key
+```
+
+must remain private and should **never be committed, uploaded, or attached to a GitHub issue**.
+
 Complete MOK enrollment after reboot, then verify:
 
 ```bash
@@ -140,9 +347,11 @@ mokutil --list-enrolled |
     grep -A5 -B5 'V4L2Loopback Module Signing'
 ```
 
-## Source tree
+---
 
-The manager expects upstream source at:
+## Source Tree
+
+The manager expects the upstream source at:
 
 ```text
 /usr/src/v4l2loopback
@@ -156,9 +365,15 @@ sudo git clone \
     /usr/src/v4l2loopback
 ```
 
-## Kernel selection
+The source comes from the upstream `v4l2loopback` project. This repository provides the Fedora management, Secure Boot, packaging, and systemd integration around it.
 
-Show Fedora's configured default kernel:
+---
+
+## Kernel Selection
+
+Version `1.0.2` uses Fedora's configured **default boot kernel**.
+
+Show it with:
 
 ```bash
 sudo grubby --default-kernel
@@ -176,72 +391,118 @@ The manager extracts:
 7.1.10-200.fc44.x86_64
 ```
 
-and requires:
+and expects the corresponding kernel paths:
 
 ```text
 /usr/src/kernels/7.1.10-200.fc44.x86_64
 /lib/modules/7.1.10-200.fc44.x86_64
 ```
 
-If `kernel-devel` for that kernel is missing, install the matching package.
+This distinction is important.
 
-## Rebuild decision
+```text
+newest installed kernel
+          ≠
+Fedora configured default boot kernel
+```
+
+The manager follows the kernel Fedora is configured to boot.
+
+If `kernel-devel` for that kernel is missing, install the matching package before rebuilding.
+
+---
+
+## Rebuild Decision
+
+The rebuild decision is:
 
 ```text
 Fedora default boot kernel
-          |
-          v
+          │
+          ▼
 expected v4l2loopback.ko
-          |
-     +----+----+
-     |         |
+          │
+     ┌────┴────┐
+     │         │
    missing    exists
-     |         |
-     |       check signer
-     |         |
-     |    +----+----+
-     |    |         |
-     |  valid     invalid
-     |    |         |
-     v    v         v
- rebuild skip     rebuild
+     │         │
+     │         ▼
+     │     check signer
+     │      ┌──┴──┐
+     │      │     │
+     │    valid invalid
+     │      │     │
+     ▼      ▼     ▼
+ rebuild   skip  rebuild
 ```
 
-Run manually:
+Run the condition manually:
 
 ```bash
 sudo v4l2loopback needs-rebuild
 echo $?
+```
 
+Interpretation:
+
+```text
+0 → rebuild required
+1 → module already valid
+```
+
+Perform the build:
+
+```bash
 sudo v4l2loopback rebuild
 ```
 
-`rebuild` independently checks the same target and signature, so a manual
-`rebuild` also avoids recompiling a valid module. If the module exists but is
-unsigned or signed by another certificate, it is rebuilt and replaced.
+`rebuild` independently checks the same target and signature. Therefore, a manual `rebuild` also avoids recompiling an already valid module.
 
-The build sequence is:
+If the module exists but is unsigned or signed by another certificate, it is rebuilt and replaced.
+
+### Build pipeline
 
 ```text
 make clean
--> make KERNELRELEASE=<default-boot-kernel>
--> sign-file sha256
--> install .ko
--> depmod -a <kernel>
+    │
+    ▼
+make KERNELRELEASE=<default-boot-kernel>
+    │
+    ▼
+kernel sign-file sha256
+    │
+    ▼
+install v4l2loopback.ko
+    │
+    ▼
+depmod -a <kernel>
 ```
 
-The module is reloaded immediately only when the target kernel equals `uname -r`.
-Otherwise it is prepared for the next boot.
+The module is reloaded immediately only when:
 
-## systemd integration
+```text
+target kernel == uname -r
+```
 
-Enable:
+Otherwise, the module is prepared for the next boot into the target kernel.
+
+---
+
+## systemd Integration
+
+Enable automatic boot-time checking:
 
 ```bash
 sudo v4l2loopback enable-systemd
 ```
 
-Generated unit:
+The manager generates:
+
+```text
+v4l2loopback-rebuild.service
+```
+
+with the equivalent logic:
 
 ```ini
 [Unit]
@@ -259,12 +520,41 @@ ExecStart=/usr/bin/v4l2loopback rebuild
 WantedBy=multi-user.target
 ```
 
-At every boot systemd evaluates the condition. Exit `1` from `needs-rebuild`
-means the module is already valid, so `ExecStart=` is intentionally skipped.
-systemd may display `status=1/FAILURE` for the condition process; in this design
-that is the expected false condition, not a failed compilation.
+The boot flow is:
 
-Check:
+```text
+boot
+ │
+ ▼
+v4l2loopback-rebuild.service
+ │
+ ▼
+needs-rebuild
+ │
+ ├── exit 0 ──► ExecStart=rebuild
+ │
+ └── exit 1 ──► skip ExecStart
+```
+
+At every boot, systemd evaluates the condition.
+
+Exit `1` from `needs-rebuild` means the module is already valid, so `ExecStart=` is intentionally skipped.
+
+systemd may display:
+
+```text
+ExecCondition=... (code=exited, status=1/FAILURE)
+```
+
+followed by:
+
+```text
+Skipped due to 'exec-condition'
+```
+
+In this design that is an **expected false condition**, not a failed compilation or broken service.
+
+Check the service:
 
 ```bash
 systemctl status v4l2loopback-rebuild.service
@@ -278,12 +568,18 @@ Disable and remove the dynamically generated unit:
 sudo v4l2loopback disable-systemd
 ```
 
-If upgrading from an older release whose generated unit already exists,
-`enable-systemd` preserves that file. Run `disable-systemd` followed by
-`enable-systemd` if you want to regenerate the unit text with the 1.0.2
-description.
+If upgrading from an older release whose generated unit already exists, `enable-systemd` preserves that file.
 
-## Persistent module configuration
+To regenerate its contents using the current version:
+
+```bash
+sudo v4l2loopback disable-systemd
+sudo v4l2loopback enable-systemd
+```
+
+---
+
+## Persistent Module Configuration
 
 The manager uses:
 
@@ -292,19 +588,31 @@ The manager uses:
 /etc/modules-load.d/v4l2loopback.conf
 ```
 
-Default options:
+Default module options:
 
 ```text
 devices=1 video_nr=10 card_label=VirtualCam exclusive_caps=1
 ```
 
+These settings provide a persistent virtual camera configuration across boots.
+
+---
+
 ## Verification
+
+Determine the Fedora default boot kernel:
 
 ```bash
 TARGET="$(sudo grubby --default-kernel)"
 TARGET="${TARGET##*/}"
 TARGET="${TARGET#vmlinuz-}"
 
+echo "$TARGET"
+```
+
+Inspect the module:
+
+```bash
 modinfo -k "$TARGET" v4l2loopback |
     grep -E '^(filename|version|signer|sig_key|sig_hashalgo):'
 ```
@@ -315,26 +623,75 @@ Expected signer:
 V4L2Loopback Module Signing
 ```
 
-For the running kernel:
+For the currently running kernel:
 
 ```bash
 lsmod | grep v4l2loopback
+```
+
+If `v4l-utils` is installed:
+
+```bash
 v4l2-ctl --list-devices
 ```
 
-## Kernel updates
+A normal installation should expose the configured virtual camera, by default:
 
-After `dnf upgrade`, Fedora normally changes the default boot kernel to the new
-kernel. On the next boot the oneshot service asks `grubby` for that configured
-default, checks the corresponding module and signer, and rebuilds only if needed.
+```text
+VirtualCam
+```
 
-This means the manager follows the kernel Fedora is configured to boot, rather
-than assuming that the highest installed `kernel-devel` is always the intended
-kernel.
+---
+
+## Kernel Updates
+
+After:
+
+```bash
+sudo dnf upgrade
+```
+
+Fedora normally changes its configured default boot kernel to the newly installed kernel.
+
+On the next boot:
+
+```text
+Fedora boot
+    │
+    ▼
+systemd oneshot
+    │
+    ▼
+grubby --default-kernel
+    │
+    ▼
+check v4l2loopback.ko
+    │
+    ▼
+check signer
+    │
+ ┌──┴───┐
+ │      │
+valid invalid/missing
+ │      │
+skip  rebuild
+```
+
+The manager therefore follows the kernel **Fedora is configured to boot**, rather than assuming that the highest installed `kernel-devel` is always the intended kernel.
+
+There is deliberately:
+
+- no DNF hook;
+- no background timer;
+- no unnecessary rebuild when the module is already valid.
+
+---
 
 ## Removal
 
-Before removing the RPM, when cleanup is desired:
+Because the manager creates local system state that does not belong directly to the RPM payload, cleanup should be explicit.
+
+Recommended sequence:
 
 ```bash
 sudo v4l2loopback uninstall
@@ -342,8 +699,78 @@ sudo v4l2loopback disable-systemd
 sudo dnf remove v4l2loopback-manager
 ```
 
-The RPM intentionally does not silently remove locally generated signing keys,
-MOK state, source trees, locally built modules, or dynamically generated systemd
-state.
+The RPM intentionally does **not** silently remove:
 
-See `FAQ.md` and `TEST.md` for troubleshooting and validation.
+```text
+MOK private/public keys
+MOK enrollment state
+/usr/src/v4l2loopback
+locally built kernel modules
+dynamically generated systemd state
+```
+
+This prevents an RPM removal from unexpectedly deleting locally generated Secure Boot material or kernel-module state.
+
+The RPM displays a cleanup reminder during final package removal.
+
+---
+
+## Documentation
+
+Additional project documentation:
+
+| Document | Purpose |
+|---|---|
+| [`FAQ.md`](FAQ.md) | Troubleshooting and frequently asked questions |
+| [`TEST.md`](TEST.md) | Validation and testing procedure |
+| [`LICENSE`](LICENSE) | GPL-3.0 license |
+
+As the project grows, additional project documentation will include:
+
+```text
+CHANGELOG.md
+CONTRIBUTING.md
+SECURITY.md
+```
+
+---
+
+## Project Scope
+
+This project manages the build and installation of the upstream `v4l2loopback` module on Fedora.
+
+```text
+┌────────────────────────────────────────────┐
+│ hhlp/v4l2loopback                          │
+│                                            │
+│ Fedora management                          │
+│ RPM / COPR packaging                       │
+│ Secure Boot / MOK signing                  │
+│ systemd integration                        │
+│ verification / rebuild logic               │
+└───────────────────┬────────────────────────┘
+                    │
+                    ▼
+┌────────────────────────────────────────────┐
+│ upstream v4l2loopback                      │
+│                                            │
+│ actual Linux kernel module source          │
+└────────────────────────────────────────────┘
+```
+
+Issues related specifically to the upstream kernel module itself may need to be reported to the upstream `v4l2loopback` project.
+
+---
+
+## License
+
+`v4l2loopback-manager` is distributed under the **GNU General Public License v3.0 only (`GPL-3.0-only`)**.
+
+See [`LICENSE`](LICENSE) for the complete license text.
+
+---
+
+**Current release:** `v1.0.2`
+**Platform:** Fedora Linux
+**Manager:** `/usr/bin/v4l2loopback`
+**Kernel target:** Fedora default boot kernel via `grubby --default-kernel`
