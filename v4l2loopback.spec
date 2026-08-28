@@ -1,5 +1,5 @@
 Name:           v4l2loopback-manager
-Version:        1.0.2
+Version:        1.0.3
 Release:        1%{?dist}
 Summary:        Secure Boot manager for v4l2loopback on Fedora
 
@@ -80,7 +80,29 @@ fi
 %{_bindir}/v4l2loopback
 
 %changelog
-* Thu Aug 27 2026 hhlp <hhlp@users.noreply.github.com> - 1.0.2-1
+* Fri Aug 28 2026 hhlp <louzaoh@gmail.com> - 1.0.3-1
+- Added `CHANGELOG.md` to maintain a structured release history following Keep a Changelog conventions.
+- Added `CONTRIBUTING.md` with development requirements, contribution workflow, testing guidelines, RPM validation, commit conventions, and security guidance.
+- Added `SECURITY.md` documenting supported versions, private vulnerability reporting, MOK private-key handling, privileged operations, and the project security model.
+- Added GitHub Issue Forms for bug reports and feature requests.
+- Added GitHub issue configuration with dedicated links for private security reports and upstream `v4l2loopback` issues.
+- Added a Pull Request template with testing, packaging, documentation, and security checklists.
+- Added a GitHub Actions ShellCheck workflow for Bash syntax validation and static analysis.
+- Added a GitHub Actions RPM build workflow to validate the SPEC, build SRPM and binary RPM packages, rebuild from the generated SRPM, and inspect the resulting package.
+- Added RPM artifact validation for the installed manager path and packaged documentation.
+- Added release-preparation tooling for synchronizing release information between `CHANGELOG.md` and `v4l2loopback.spec`.
+- Added automatic GitHub Release support based on version tags and `CHANGELOG.md` release entries.
+- Added `example.work-flow.md` as a example of a Work-Flow for future use.
+- Expanded `README.md` into the main project landing page with installation, architecture, Secure Boot, kernel-selection, rebuild, systemd, verification, removal, and project-scope documentation.
+- Added project flow diagrams describing the module build, signing, rebuild, systemd, and responsibility-boundary workflows.
+- Improved project documentation navigation with tables of contents and cross-document references.
+- Extended ShellCheck coverage to include project maintenance and release scripts.
+- Extended RPM CI triggers to include SPEC, changelog, release tooling, and workflow changes.
+- Improved RPM CI validation to verify package metadata, expected files, generated SRPMs, binary RPMs, and SRPM rebuildability.
+- Standardized release preparation around `CHANGELOG.md` as the primary human-maintained source of release changes.
+- Prepared the project for automated GitHub Release and COPR release workflows.
+
+* Thu Aug 27 2026 hhlp <louzaoh@gmail.com> - 1.0.2-1
 - Use the Fedora default boot kernel as the module build target
 - Detect the target kernel using grubby --default-kernel
 - Verify that v4l2loopback.ko is signed with the expected MOK certificate
@@ -89,12 +111,12 @@ fi
 - Add grubby runtime dependency
 - Update systemd service descriptions, documentation, and tests
 
-* Thu Aug 27 2026 hhlp <hhlp@users.noreply.github.com> - 1.0.1-1
+* Thu Aug 27 2026 hhlp <louzaoh@gmail.com> - 1.0.1-1
 - Use /usr/bin/v4l2loopback as the canonical Fedora executable path
 - Install the manager with %{_bindir}
 - Update generated systemd integration to use /usr/bin/v4l2loopback
 
-* Thu Aug 27 2026 hhlp <hhlp@users.noreply.github.com> - 1.0.0-1
+* Thu Aug 27 2026 hhlp <louzaoh@gmail.com> - 1.0.0-1
 - Initial COPR package
 - Install management utility as /usr/bin/v4l2loopback
 - Add package-removal cleanup warning
