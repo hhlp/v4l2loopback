@@ -1,0 +1,10 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/hhlp/v4l2loopback/security/advisories/new
+    about: Report security vulnerabilities privately. Do not open a public issue for security-sensitive problems.
+
+  - name: Upstream v4l2loopback issues
+    url: https://github.com/v4l2loopback/v4l2loopback/issues
+    about: Report problems with the upstream v4l2loopback kernel module implementation.
