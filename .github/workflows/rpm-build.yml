@@ -55,6 +55,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
+      - name: Trust GitHub workspace
+        run: |
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+
       - name: Validate SPEC syntax
         run: |
           rpmspec -P v4l2loopback.spec >/dev/null
