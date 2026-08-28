@@ -1,0 +1,256 @@
+name: Bug report
+description: Report a reproducible problem with v4l2loopback-manager on Fedora
+title: "[Bug]: "
+labels:
+
+* bug
+  assignees: []
+
+body:
+
+* type: markdown
+  attributes:
+  value: |
+  Thank you for reporting a problem with `v4l2loopback-manager`.
+
+  ```
+  Please complete the information below so the issue can be reproduced and diagnosed.
+
+  **Security warning:** Do not include private keys, passwords, tokens, credentials, or the contents of `/var/lib/shim-signed/mok/v4l.key`.
+
+  Security vulnerabilities should be reported privately according to `SECURITY.md`.
+  ```
+
+* type: input
+  id: manager-version
+  attributes:
+  label: v4l2loopback-manager version
+  description: |
+  Run: rpm -q v4l2loopback-manager
+  placeholder: "Example: v4l2loopback-manager-1.0.2-1.fc44.noarch"
+  validations:
+  required: true
+
+* type: input
+  id: fedora-version
+  attributes:
+  label: Fedora version
+  description: |
+  Run: cat /etc/fedora-release
+  placeholder: "Example: Fedora Linux 44"
+  validations:
+  required: true
+
+* type: input
+  id: running-kernel
+  attributes:
+  label: Running kernel
+  description: |
+  Run: uname -r
+  placeholder: "Example: 7.1.10-200.fc44.x86_64"
+  validations:
+  required: true
+
+* type: input
+  id: default-kernel
+  attributes:
+  label: Fedora default boot kernel
+  description: |
+  Run: sudo grubby --default-kernel
+  placeholder: "Example: /boot/vmlinuz-7.1.10-200.fc44.x86_64"
+  validations:
+  required: true
+
+* type: dropdown
+  id: secure-boot
+  attributes:
+  label: Secure Boot state
+  description: |
+  Check with: mokutil --sb-state
+  options:
+  - Enabled
+  - Disabled
+  - Unknown
+  validations:
+  required: true
+
+* type: dropdown
+  id: installation-method
+  attributes:
+  label: Installation method
+  options:
+  - COPR / RPM
+  - Local RPM build
+  - Source / manual installation
+  - Other
+  validations:
+  required: true
+
+* type: dropdown
+  id: affected-command
+  attributes:
+  label: Affected command
+  description: Select the command most closely related to the problem.
+  options:
+  - genkey
+  - needs-rebuild
+  - rebuild
+  - reinstall
+  - uninstall
+  - enable-systemd
+  - disable-systemd
+  - help
+  - RPM installation / upgrade / removal
+  - systemd boot-time service
+  - Other
+  validations:
+  required: true
+
+* type: textarea
+  id: description
+  attributes:
+  label: Problem description
+  description: Clearly describe what went wrong.
+  placeholder: Describe the problem and when it occurs.
+  validations:
+  required: true
+
+* type: textarea
+  id: reproduce
+  attributes:
+  label: Steps to reproduce
+  description: Provide the smallest sequence of commands or actions that reproduces the problem.
+  placeholder: |
+  1. Install ...
+  2. Run ...
+  3. Reboot ...
+  4. Observe ...
+  validations:
+  required: true
+
+* type: textarea
+  id: expected
+  attributes:
+  label: Expected behavior
+  description: What did you expect to happen?
+  validations:
+  required: true
+
+* type: textarea
+  id: actual
+  attributes:
+  label: Actual behavior
+  description: What actually happened?
+  validations:
+  required: true
+
+* type: textarea
+  id: kernel-packages
+  attributes:
+  label: Kernel packages
+  description: |
+  Please paste the output of:
+  rpm -q kernel kernel-devel
+  render: text
+  validations:
+  required: true
+
+* type: textarea
+  id: module-info
+  attributes:
+  label: v4l2loopback module information
+  description: |
+  Determine the target kernel and inspect the module with:
+
+  ```
+  TARGET="$(sudo grubby --default-kernel)"
+  TARGET="${TARGET##*/}"
+  TARGET="${TARGET#vmlinuz-}"
+
+  modinfo -k "$TARGET" v4l2loopback |
+      grep -E '^(filename|version|signer|sig_key|sig_hashalgo):'
+
+  If the module does not exist, paste the resulting error instead.
+  ```
+
+  render: text
+  validations:
+  required: true
+
+* type: textarea
+  id: needs-rebuild
+  attributes:
+  label: needs-rebuild result
+  description: |
+  Please run:
+
+  ```
+  sudo v4l2loopback needs-rebuild
+  echo "exit=$?"
+
+  Remember:
+  exit 0 = rebuild required
+  exit 1 = module already valid
+  ```
+
+  render: text
+  validations:
+  required: true
+
+* type: textarea
+  id: systemd-status
+  attributes:
+  label: systemd service status
+  description: |
+  If the problem involves systemd, paste the output of:
+
+  ```
+  systemctl status v4l2loopback-rebuild.service --no-pager
+
+  Otherwise enter "Not applicable".
+  ```
+
+  render: text
+  validations:
+  required: true
+
+* type: textarea
+  id: journal
+  attributes:
+  label: Relevant journal output
+  description: |
+  If the problem involves the boot-time service, paste the relevant output of:
+
+  ```
+  journalctl -b -u v4l2loopback-rebuild.service --no-pager
+
+  Otherwise enter "Not applicable".
+
+  Review logs before submitting them and remove unrelated sensitive information.
+  ```
+
+  render: text
+  validations:
+  required: true
+
+* type: textarea
+  id: additional-context
+  attributes:
+  label: Additional context
+  description: Add any other information that may help reproduce or diagnose the issue.
+  validations:
+  required: false
+
+* type: checkboxes
+  id: confirmations
+  attributes:
+  label: Before submitting
+  options:
+  - label: I checked the existing issues for a similar report.
+  required: true
+  - label: I reviewed `FAQ.md` and the relevant sections of `TEST.md`.
+  required: true
+  - label: I verified that this report does not contain private keys, passwords, tokens, credentials, or other secrets.
+  required: true
+  - label: I understand that `/var/lib/shim-signed/mok/v4l.key` must never be uploaded or published.
+  required: true
