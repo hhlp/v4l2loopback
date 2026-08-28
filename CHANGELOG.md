@@ -32,6 +32,7 @@ and this project follows [Semantic Versioning](https://semver.org/).
   between `CHANGELOG.md` and `v4l2loopback.spec`.
 * Added automatic GitHub Release support based on version tags and
   `CHANGELOG.md` release entries.
+* Added `example.work-flow.md` as a example of a Work-Flow for future use.
 
 ### Changed
 
