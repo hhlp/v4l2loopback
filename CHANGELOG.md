@@ -11,6 +11,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 - Professional project documentation.
 - Project changelog.
+- Contribution guidelines.
+- Security policy.
 
 ---
 

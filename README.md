@@ -719,19 +719,14 @@ The RPM displays a cleanup reminder during final package removal.
 
 Additional project documentation:
 
-| Document | Purpose |
-|---|---|
-| [`FAQ.md`](FAQ.md) | Troubleshooting and frequently asked questions |
-| [`TEST.md`](TEST.md) | Validation and testing procedure |
-| [`LICENSE`](LICENSE) | GPL-3.0 license |
-
-As the project grows, additional project documentation will include:
-
-```text
-CHANGELOG.md
-CONTRIBUTING.md
-SECURITY.md
-```
+| Document                             | Purpose                                          |
+|--------------------------------------|--------------------------------------------------|
+| [`FAQ.md`](FAQ.md)                   | Troubleshooting and frequently asked questions   |
+| [`TEST.md`](TEST.md)                 | Validation and testing procedure                 |
+| [`CHANGELOG.md`](CHANGELOG.md)       | Release history and notable changes              |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contribution workflow and development guidelines |
+| [`SECURITY.md`](SECURITY.md)         | Security policy and vulnerability reporting      |
+| [`LICENSE`](LICENSE)                 | GPL-3.0 license                                  |
 
 ---
 
