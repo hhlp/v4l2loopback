@@ -1,0 +1,128 @@
+name: Feature request
+description: Suggest an improvement or new capability for v4l2loopback-manager
+title: "[Feature]: "
+labels:
+  - enhancement
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting an improvement to `v4l2loopback-manager`.
+
+        This project focuses on Fedora integration around the upstream `v4l2loopback` kernel module, including Secure Boot, MOK signing, RPM/COPR packaging, systemd integration, module verification, and rebuild management.
+
+        Requests concerning the actual kernel module implementation may belong to the upstream `v4l2loopback` project.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or limitation
+      description: Describe the problem, limitation, or workflow that motivates this request.
+      placeholder: |
+        Describe what is currently difficult, missing, repetitive, or unclear.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior or capability you would like to add.
+      placeholder: |
+        Explain how you think the feature should work.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Select the area most closely related to the request.
+      options:
+        - Manager command / CLI
+        - Kernel selection
+        - Module build
+        - Module signing
+        - Secure Boot / MOK
+        - Signature verification
+        - systemd integration
+        - RPM packaging
+        - COPR packaging
+        - Installation / removal
+        - Documentation
+        - Testing
+        - CI / GitHub Actions
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Expected project scope
+      description: Where do you believe this feature belongs?
+      options:
+        - v4l2loopback-manager
+        - Upstream v4l2loopback
+        - Both projects
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: Describe a real example where this feature would be useful.
+      placeholder: |
+        Example:
+        After installing a new Fedora kernel, I would like...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe any current workaround or alternative solution you have considered.
+      placeholder: |
+        Explain how you currently solve the problem, if applicable.
+    validations:
+      required: false
+
+  - type: textarea
+    id: command-example
+    attributes:
+      label: Suggested command or configuration
+      description: |
+        If the proposal affects the command-line interface, configuration, systemd, or packaging, show what the desired usage might look like.
+      placeholder: |
+        Example:
+
+        sudo v4l2loopback verify
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add any other technical details, examples, diagrams, or references that may help explain the request.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked the existing issues for a similar feature request.
+          required: true
+        - label: I reviewed the project scope described in `README.md`.
+          required: true
+        - label: I understand that changes to the actual `v4l2loopback` kernel module may need to be proposed upstream.
+          required: true
+        - label: This request does not contain private keys, passwords, tokens, credentials, or other secrets.
+          required: true
