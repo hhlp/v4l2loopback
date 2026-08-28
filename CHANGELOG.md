@@ -9,10 +9,48 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- Professional project documentation.
-- Project changelog.
-- Contribution guidelines.
-- Security policy.
+* Added `CHANGELOG.md` to maintain a structured release history following
+  Keep a Changelog conventions.
+* Added `CONTRIBUTING.md` with development requirements, contribution workflow,
+  testing guidelines, RPM validation, commit conventions, and security guidance.
+* Added `SECURITY.md` documenting supported versions, private vulnerability
+  reporting, MOK private-key handling, privileged operations, and the project
+  security model.
+* Added GitHub Issue Forms for bug reports and feature requests.
+* Added GitHub issue configuration with dedicated links for private security
+  reports and upstream `v4l2loopback` issues.
+* Added a Pull Request template with testing, packaging, documentation, and
+  security checklists.
+* Added a GitHub Actions ShellCheck workflow for Bash syntax validation and
+  static analysis.
+* Added a GitHub Actions RPM build workflow to validate the SPEC, build SRPM
+  and binary RPM packages, rebuild from the generated SRPM, and inspect the
+  resulting package.
+* Added RPM artifact validation for the installed manager path and packaged
+  documentation.
+* Added release-preparation tooling for synchronizing release information
+  between `CHANGELOG.md` and `v4l2loopback.spec`.
+* Added automatic GitHub Release support based on version tags and
+  `CHANGELOG.md` release entries.
+
+### Changed
+
+* Expanded `README.md` into the main project landing page with installation,
+  architecture, Secure Boot, kernel-selection, rebuild, systemd, verification,
+  removal, and project-scope documentation.
+* Added project flow diagrams describing the module build, signing, rebuild,
+  systemd, and responsibility-boundary workflows.
+* Improved project documentation navigation with tables of contents and
+  cross-document references.
+* Extended ShellCheck coverage to include project maintenance and release
+  scripts.
+* Extended RPM CI triggers to include SPEC, changelog, release tooling, and
+  workflow changes.
+* Improved RPM CI validation to verify package metadata, expected files,
+  generated SRPMs, binary RPMs, and SRPM rebuildability.
+* Standardized release preparation around `CHANGELOG.md` as the primary
+  human-maintained source of release changes.
+* Prepared the project for automated GitHub Release and COPR release workflows.
 
 ---
 

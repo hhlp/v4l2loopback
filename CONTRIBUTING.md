@@ -18,10 +18,12 @@ Contributions involving bug fixes, documentation, testing, packaging, and improv
 - [ShellCheck](#shellcheck)
 - [Testing](#testing)
 - [RPM Validation](#rpm-validation)
+- [Release Preparation](#release-preparation)
 - [Commit Messages](#commit-messages)
 - [Pull Requests](#pull-requests)
 - [Reporting Bugs](#reporting-bugs)
 - [Security Issues](#security-issues)
+- [Contribution Workflow](#contribution-workflow)
 
 ---
 
@@ -187,21 +189,24 @@ Avoid mixing unrelated refactoring, documentation changes, and functional change
 
 ## ShellCheck
 
-Run ShellCheck against the manager:
-
-```bash
-shellcheck v4l2loopback.sh
-```
-
-A contribution modifying the shell script should not introduce new ShellCheck warnings.
-
-Also perform a Bash syntax check:
+Run Bash syntax checks against all maintained shell scripts:
 
 ```bash
 bash -n v4l2loopback.sh
+bash -n scripts/prepare-release.sh
 ```
 
-Both commands should complete successfully before committing.
+Run ShellCheck against both scripts:
+
+```bash
+shellcheck \
+    v4l2loopback.sh \
+    scripts/prepare-release.sh
+```
+
+Changes to maintained shell scripts should not introduce new ShellCheck warnings.
+
+These checks are also performed automatically by GitHub Actions.
 
 ---
 
@@ -257,6 +262,10 @@ Changes affecting:
 ```text
 v4l2loopback.spec
 v4l2loopback.sh
+CHANGELOG.md
+scripts/prepare-release.sh
+.github/workflows/rpm-build.yml
+.github/workflows/release.yml
 README.md
 FAQ.md
 TEST.md
@@ -298,6 +307,77 @@ RPMS/
 SRPMS/
 ```
 
+The workflow and release-tooling files listed above are not necessarily part of the RPM payload. They are included here because changes to them can affect package validation, release preparation, or CI behavior.
+
+---
+
+## Release Preparation
+
+Release-related changes must first be documented under:
+
+```text
+## [Unreleased]
+```
+
+in `CHANGELOG.md`.
+
+Do not manually duplicate release information between `CHANGELOG.md` and the RPM `%changelog`.
+
+When preparing a new release, use:
+
+```bash
+./scripts/prepare-release.sh <version>
+```
+
+For example:
+
+```bash
+./scripts/prepare-release.sh 1.0.3
+```
+
+The release preparation flow is:
+
+```text
+CHANGELOG.md [Unreleased]
+        │
+        ▼
+prepare-release.sh X.Y.Z
+        │
+        ├──► CHANGELOG.md version section
+        ├──► v4l2loopback.spec Version:
+        └──► RPM %changelog
+        │
+        ▼
+review generated changes
+```
+
+After running the script, always review the generated changes:
+
+```bash
+git diff -- CHANGELOG.md v4l2loopback.spec
+```
+
+Validate the result:
+
+```bash
+rpmspec -P v4l2loopback.spec >/dev/null
+rpmspec -q v4l2loopback.spec
+```
+
+The release preparation script does not create a commit, Git tag, or GitHub Release automatically.
+
+After reviewing the generated files, the normal release sequence is:
+
+```bash
+git add CHANGELOG.md v4l2loopback.spec
+git commit -m "chore: prepare v1.0.3 release"
+git tag -a v1.0.3 -m "v1.0.3"
+git push origin main
+git push origin v1.0.3
+```
+
+Pushing the version tag triggers the GitHub Release workflow. The workflow validates that the tag follows `vX.Y.Z`, matches `Version:` in `v4l2loopback.spec`, and has a matching release section in `CHANGELOG.md` before publishing the GitHub Release.
+
 ---
 
 ## Commit Messages
@@ -312,17 +392,17 @@ General format:
 
 Recommended types:
 
-| Type | Purpose |
-|---|---|
-| `feat` | New functionality |
-| `fix` | Bug fix |
-| `hotfix` | Urgent production fix |
-| `docs` | Documentation |
-| `test` | Tests |
-| `refactor` | Internal code restructuring |
-| `chore` | Maintenance |
-| `ci` | Continuous integration |
-| `build` | RPM/build-system changes |
+| Type          | Purpose                       |
+|---            |---                            |
+| `feat`        | New functionality             |
+| `fix`         | Bug fix                       |
+| `hotfix`      | Urgent production fix         |
+| `docs`        | Documentation                 |
+| `test`        | Tests                         |
+| `refactor`    | Internal code restructuring   |
+| `chore`       | Maintenance                   |
+| `ci`          | Continuous integration        |
+| `build`       | RPM/build-system changes      |
 
 Examples:
 
@@ -352,12 +432,14 @@ Before opening a Pull Request, verify:
 
 - The branch is based on the current `main`.
 - The change has a clear and limited purpose.
-- `bash -n v4l2loopback.sh` succeeds when the script was modified.
-- `shellcheck v4l2loopback.sh` succeeds when the script was modified.
+- `bash -n v4l2loopback.sh` succeeds when the manager was modified.
+- `shellcheck v4l2loopback.sh` succeeds when the manager was modified.
+- `bash -n scripts/prepare-release.sh` succeeds when the release script was modified.
+- `shellcheck scripts/prepare-release.sh` succeeds when the release script was modified.
 - Relevant tests from `TEST.md` have been completed.
 - RPM-related changes have been validated.
 - Documentation has been updated when behavior changes.
-- `CHANGELOG.md` has been updated when the change is user-visible.
+- `CHANGELOG.md` has been updated under `[Unreleased]` when the change is user-visible.
 - No generated RPMs, private keys, credentials, or local build artifacts are included.
 
 Review the final diff:
@@ -452,7 +534,8 @@ make changes
      ├── bash -n
      ├── ShellCheck
      ├── TEST.md
-     └── RPM validation
+     ├── RPM validation
+     └── CHANGELOG.md [Unreleased]
      │
      ▼
 review diff

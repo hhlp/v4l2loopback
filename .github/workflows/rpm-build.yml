@@ -5,25 +5,23 @@ on:
     branches:
       - main
     paths:
-      - "v4l2loopback.spec"
       - "v4l2loopback.sh"
-      - "README.md"
-      - "FAQ.md"
-      - "TEST.md"
-      - "LICENSE"
+      - "v4l2loopback.spec"
+      - "CHANGELOG.md"
+      - "scripts/prepare-release.sh"
       - ".github/workflows/rpm-build.yml"
+      - ".github/workflows/release.yml"
 
   pull_request:
     branches:
       - main
     paths:
-      - "v4l2loopback.spec"
       - "v4l2loopback.sh"
-      - "README.md"
-      - "FAQ.md"
-      - "TEST.md"
-      - "LICENSE"
+      - "v4l2loopback.spec"
+      - "CHANGELOG.md"
+      - "scripts/prepare-release.sh"
       - ".github/workflows/rpm-build.yml"
+      - ".github/workflows/release.yml"
 
   workflow_dispatch:
 
@@ -36,53 +34,75 @@ concurrency:
 
 jobs:
   rpm-build:
-    name: Build Fedora RPM
+    name: Build and validate RPM
     runs-on: ubuntu-latest
 
     container:
       image: fedora:latest
 
     steps:
-      - name: Install RPM build tools
+      - name: Install build dependencies
         run: |
+          set -Eeuo pipefail
+
           dnf install -y \
               git \
               rpm-build \
               rpmdevtools \
               tar \
-              gzip
+              gzip \
+              findutils \
+              coreutils
 
       - name: Check out repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Trust GitHub workspace
         run: |
-          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+          set -Eeuo pipefail
 
-      - name: Validate SPEC syntax
+          git config --global \
+              --add safe.directory \
+              "${GITHUB_WORKSPACE}"
+
+      - name: Validate SPEC
         run: |
+          set -Eeuo pipefail
+
           rpmspec -P v4l2loopback.spec >/dev/null
+          rpmspec -q v4l2loopback.spec
 
-      - name: Show package metadata
+      - name: Determine package version
         run: |
-          rpmspec -q \
-              --qf '%{NAME} %{VERSION}-%{RELEASE} %{ARCH}\n' \
-              v4l2loopback.spec
-
-      - name: Prepare RPM build tree
-        run: |
-          set -euo pipefail
+          set -Eeuo pipefail
 
           VERSION="$(
-              rpmspec -q \
-                  --qf '%{VERSION}\n' \
-                  v4l2loopback.spec |
-                  head -n1
+              awk '
+                  $1 == "Version:" {
+                      print $2
+                      exit
+                  }
+              ' v4l2loopback.spec
           )"
 
-          echo "Building version: ${VERSION}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Invalid SPEC version: $VERSION"
+              exit 1
+          fi
 
-          RPM_TOPDIR="${HOME}/rpmbuild"
+          echo "Building version: $VERSION"
+
+          {
+              echo "VERSION=$VERSION"
+          } >> "$GITHUB_ENV"
+
+      - name: Create RPM build tree
+        run: |
+          set -Eeuo pipefail
+
+          RPM_TOPDIR="${GITHUB_WORKSPACE}/rpmbuild"
 
           mkdir -p \
               "${RPM_TOPDIR}/BUILD" \
@@ -92,144 +112,196 @@ jobs:
               "${RPM_TOPDIR}/SPECS" \
               "${RPM_TOPDIR}/SRPMS"
 
-          cp v4l2loopback.spec \
-              "${RPM_TOPDIR}/SPECS/v4l2loopback.spec"
+          echo "RPM_TOPDIR=$RPM_TOPDIR" >> "$GITHUB_ENV"
+
+      - name: Create Source0 archive
+        run: |
+          set -Eeuo pipefail
 
           git archive \
-              --format=tar \
+              --format=tar.gz \
               --prefix="v4l2loopback-${VERSION}/" \
-              HEAD |
-              gzip -n \
-                  > "${RPM_TOPDIR}/SOURCES/v${VERSION}.tar.gz"
+              --output="${RPM_TOPDIR}/SOURCES/v${VERSION}.tar.gz" \
+              HEAD
 
-          echo
-          echo "Source archive:"
+          echo "Created:"
           ls -lh "${RPM_TOPDIR}/SOURCES/v${VERSION}.tar.gz"
 
           echo
           echo "Archive contents:"
-          tar -tzf "${RPM_TOPDIR}/SOURCES/v${VERSION}.tar.gz" |
-              head -n 30
+          tar -tzf \
+              "${RPM_TOPDIR}/SOURCES/v${VERSION}.tar.gz" |
+              sed -n '1,30p'
 
-      - name: Build source RPM
+      - name: Copy SPEC
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
+
+          cp \
+              v4l2loopback.spec \
+              "${RPM_TOPDIR}/SPECS/v4l2loopback.spec"
+
+      - name: Build source and binary RPM
+        run: |
+          set -Eeuo pipefail
 
           rpmbuild \
-              --define "_topdir ${HOME}/rpmbuild" \
-              -bs \
-              "${HOME}/rpmbuild/SPECS/v4l2loopback.spec"
+              --define "_topdir ${RPM_TOPDIR}" \
+              -ba \
+              "${RPM_TOPDIR}/SPECS/v4l2loopback.spec"
 
-      - name: Build binary RPM
+      - name: Locate build artifacts
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
 
-          rpmbuild \
-              --define "_topdir ${HOME}/rpmbuild" \
-              -bb \
-              "${HOME}/rpmbuild/SPECS/v4l2loopback.spec"
+          echo "Source RPM:"
+          find "${RPM_TOPDIR}/SRPMS" \
+              -type f \
+              -name '*.src.rpm' \
+              -print
 
-      - name: Rebuild from source RPM
+          echo
+          echo "Binary RPM:"
+          find "${RPM_TOPDIR}/RPMS" \
+              -type f \
+              -name '*.rpm' \
+              -print
+
+      - name: Rebuild from SRPM
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
 
           SRPM="$(
-              find "${HOME}/rpmbuild/SRPMS" \
+              find "${RPM_TOPDIR}/SRPMS" \
                   -type f \
                   -name '*.src.rpm' \
                   -print \
                   -quit
           )"
 
-          if [[ -z "${SRPM}" ]]; then
-              echo "ERROR: source RPM was not created."
+          if [[ -z "$SRPM" ]]; then
+              echo "::error::Source RPM not found"
               exit 1
           fi
 
           echo "Rebuilding:"
-          echo "  ${SRPM}"
-
-          REBUILD_TOPDIR="${HOME}/rpmbuild-rebuild"
-
-          mkdir -p \
-              "${REBUILD_TOPDIR}/BUILD" \
-              "${REBUILD_TOPDIR}/BUILDROOT" \
-              "${REBUILD_TOPDIR}/RPMS" \
-              "${REBUILD_TOPDIR}/SOURCES" \
-              "${REBUILD_TOPDIR}/SPECS" \
-              "${REBUILD_TOPDIR}/SRPMS"
+          echo "$SRPM"
 
           rpmbuild \
-              --define "_topdir ${REBUILD_TOPDIR}" \
+              --define "_topdir ${RPM_TOPDIR}/rebuild" \
               --rebuild \
-              "${SRPM}"
+              "$SRPM"
 
-      - name: Inspect RPM
+      - name: Inspect binary RPM
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
 
-          RPM="$(
-              find "${HOME}/rpmbuild/RPMS" \
+          RPM_FILE="$(
+              find "${RPM_TOPDIR}/RPMS" \
                   -type f \
                   -name '*.rpm' \
+                  ! -name '*.src.rpm' \
                   -print \
                   -quit
           )"
 
-          if [[ -z "${RPM}" ]]; then
-              echo "ERROR: binary RPM was not created."
+          if [[ -z "$RPM_FILE" ]]; then
+              echo "::error::Binary RPM not found"
               exit 1
           fi
 
           echo "RPM:"
-          echo "  ${RPM}"
-          echo
-
-          rpm -qpi "${RPM}"
+          echo "$RPM_FILE"
 
           echo
-          echo "Package contents:"
-          rpm -qlp "${RPM}"
+          echo "Package metadata:"
+          rpm -qip "$RPM_FILE"
 
-      - name: Verify manager executable
+          echo
+          echo "Package files:"
+          rpm -qlp "$RPM_FILE"
+
+          echo
+          echo "Dependencies:"
+          rpm -qpR "$RPM_FILE"
+
+      - name: Verify installed manager path
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
 
-          RPM="$(
-              find "${HOME}/rpmbuild/RPMS" \
+          RPM_FILE="$(
+              find "${RPM_TOPDIR}/RPMS" \
                   -type f \
                   -name '*.rpm' \
+                  ! -name '*.src.rpm' \
                   -print \
                   -quit
           )"
 
-          rpm -qlp "${RPM}" |
-              grep -Fx '/usr/bin/v4l2loopback'
+          if ! rpm -qlp "$RPM_FILE" |
+              grep -Fxq '/usr/bin/v4l2loopback'
+          then
+              echo "::error::RPM does not contain /usr/bin/v4l2loopback"
+              exit 1
+          fi
 
-      - name: Collect build artifacts
+          echo "Verified:"
+          echo "/usr/bin/v4l2loopback"
+
+      - name: Verify documentation
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
 
-          mkdir -p "${GITHUB_WORKSPACE}/artifacts"
+          RPM_FILE="$(
+              find "${RPM_TOPDIR}/RPMS" \
+                  -type f \
+                  -name '*.rpm' \
+                  ! -name '*.src.rpm' \
+                  -print \
+                  -quit
+          )"
 
-          find "${HOME}/rpmbuild/SRPMS" \
+          FILES="$(
+              rpm -qlp "$RPM_FILE"
+          )"
+
+          for doc in \
+              README.md \
+              FAQ.md \
+              TEST.md \
+              LICENSE
+          do
+              if ! grep -Fq "/${doc}" <<< "$FILES"; then
+                  echo "::error::Expected RPM documentation missing: $doc"
+                  exit 1
+              fi
+          done
+
+          echo "RPM documentation verified."
+
+      - name: Collect artifacts
+        run: |
+          set -Eeuo pipefail
+
+          mkdir -p artifacts
+
+          find "${RPM_TOPDIR}/SRPMS" \
               -type f \
               -name '*.src.rpm' \
-              -exec cp -v {} "${GITHUB_WORKSPACE}/artifacts/" \;
+              -exec cp -v {} artifacts/ \;
 
-          find "${HOME}/rpmbuild/RPMS" \
+          find "${RPM_TOPDIR}/RPMS" \
               -type f \
               -name '*.rpm' \
-              -exec cp -v {} "${GITHUB_WORKSPACE}/artifacts/" \;
+              -exec cp -v {} artifacts/ \;
 
           echo
-          echo "Artifacts:"
-          ls -lh "${GITHUB_WORKSPACE}/artifacts"
+          echo "Collected artifacts:"
+          ls -lh artifacts
 
       - name: Upload RPM artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: fedora-rpm
-          path: artifacts/*.rpm
+          name: v4l2loopback-manager-${{ env.VERSION }}-rpm
+          path: artifacts/
           if-no-files-found: error
-          retention-days: 7
