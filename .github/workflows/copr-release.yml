@@ -1,0 +1,140 @@
+name: COPR Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: copr-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  copr:
+    name: Build Fedora COPR
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Validate release tag
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          TAG="${GITHUB_REF_NAME}"
+
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Invalid release tag: $TAG"
+              exit 1
+          fi
+
+          VERSION="${TAG#v}"
+
+          SPEC_VERSION="$(
+              awk '
+                  $1 == "Version:" {
+                      print $2
+                      exit
+                  }
+              ' v4l2loopback.spec
+          )"
+
+          if [[ -z "$SPEC_VERSION" ]]; then
+              echo "::error::Unable to read Version from v4l2loopback.spec"
+              exit 1
+          fi
+
+          if [[ "$VERSION" != "$SPEC_VERSION" ]]; then
+              echo "::error::Tag version $VERSION does not match spec version $SPEC_VERSION"
+              exit 1
+          fi
+
+          echo "Tag:          $TAG"
+          echo "Spec version: $SPEC_VERSION"
+          echo "Validation OK"
+
+      - name: Verify tag points to checked out commit
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          TAG="${GITHUB_REF_NAME}"
+
+          TAG_COMMIT="$(git rev-list -n 1 "$TAG")"
+          HEAD_COMMIT="$(git rev-parse HEAD)"
+
+          if [[ "$TAG_COMMIT" != "$HEAD_COMMIT" ]]; then
+              echo "::error::Tag $TAG does not point to checked out commit"
+              exit 1
+          fi
+
+          echo "Tag commit: $TAG_COMMIT"
+
+      - name: Install COPR CLI
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          sudo apt-get update
+          sudo apt-get install -y copr-cli
+
+      - name: Configure COPR
+        shell: bash
+        env:
+          COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
+        run: |
+          set -Eeuo pipefail
+
+          if [[ -z "${COPR_CONFIG:-}" ]]; then
+              echo "::error::COPR_CONFIG secret is empty or missing"
+              exit 1
+          fi
+
+          mkdir -p "${HOME}/.config"
+
+          printf '%s\n' "$COPR_CONFIG" \
+              > "${HOME}/.config/copr"
+
+          chmod 600 "${HOME}/.config/copr"
+
+      - name: Configure COPR package for release tag
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          TAG="${GITHUB_REF_NAME}"
+
+          copr-cli edit-package-scm \
+              hhlp/v4l2loopback \
+              --name v4l2loopback-manager \
+              --clone-url https://github.com/hhlp/v4l2loopback.git \
+              --commit "$TAG" \
+              --spec v4l2loopback.spec \
+              --type git \
+              --method rpkg \
+              --webhook-rebuild off
+
+      - name: Verify COPR package configuration
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          copr-cli get-package \
+              hhlp/v4l2loopback \
+              --name v4l2loopback-manager
+
+      - name: Trigger COPR build
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          copr-cli build-package \
+              hhlp/v4l2loopback \
+              --name v4l2loopback-manager
