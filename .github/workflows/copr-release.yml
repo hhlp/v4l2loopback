@@ -5,11 +5,18 @@ on:
     tags:
       - "v*.*.*"
 
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build (for example: v1.0.3)"
+        required: true
+        type: string
+
 permissions:
   contents: read
 
 concurrency:
-  group: copr-release-${{ github.ref }}
+  group: copr-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -17,23 +24,51 @@ jobs:
     name: Build Fedora COPR
     runs-on: ubuntu-latest
 
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
+    container:
+      image: fedora:latest
 
-      - name: Validate release tag
+    steps:
+      - name: Install COPR client
         shell: bash
         run: |
           set -Eeuo pipefail
 
-          TAG="${GITHUB_REF_NAME}"
+          dnf install -y \
+              copr-cli \
+              git
+
+      - name: Determine release tag
+        shell: bash
+        env:
+          MANUAL_TAG: ${{ inputs.tag }}
+        run: |
+          set -Eeuo pipefail
+
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+              TAG="$MANUAL_TAG"
+          else
+              TAG="$GITHUB_REF_NAME"
+          fi
 
           if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "::error::Invalid release tag: $TAG"
               exit 1
           fi
+
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+
+          printf 'Release tag: %s\n' "$TAG"
+
+      - name: Check out release tag
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Validate tag against spec
+        shell: bash
+        run: |
+          set -Eeuo pipefail
 
           VERSION="${TAG#v}"
 
@@ -52,89 +87,70 @@ jobs:
           fi
 
           if [[ "$VERSION" != "$SPEC_VERSION" ]]; then
-              echo "::error::Tag version $VERSION does not match spec version $SPEC_VERSION"
+              echo "::error::Tag version ($VERSION) does not match spec version ($SPEC_VERSION)"
               exit 1
           fi
 
-          echo "Tag:          $TAG"
-          echo "Spec version: $SPEC_VERSION"
-          echo "Validation OK"
+          printf 'Tag version : %s\n' "$VERSION"
+          printf 'SPEC version: %s\n' "$SPEC_VERSION"
 
       - name: Verify tag points to checked out commit
         shell: bash
         run: |
           set -Eeuo pipefail
 
-          TAG="${GITHUB_REF_NAME}"
+          TAG_COMMIT="$(
+              git rev-list \
+                  -n 1 \
+                  "$TAG"
+          )"
 
-          TAG_COMMIT="$(git rev-list -n 1 "$TAG")"
-          HEAD_COMMIT="$(git rev-parse HEAD)"
+          HEAD_COMMIT="$(
+              git rev-parse HEAD
+          )"
 
           if [[ "$TAG_COMMIT" != "$HEAD_COMMIT" ]]; then
               echo "::error::Tag $TAG does not point to checked out commit"
               exit 1
           fi
 
-          echo "Tag commit: $TAG_COMMIT"
+          printf 'Tag commit : %s\n' "$TAG_COMMIT"
+          printf 'HEAD commit: %s\n' "$HEAD_COMMIT"
 
-      - name: Install COPR CLI
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          sudo apt-get update
-          sudo apt-get install -y copr-cli
-
-      - name: Configure COPR
+      - name: Configure COPR authentication
         shell: bash
         env:
           COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
         run: |
           set -Eeuo pipefail
 
-          if [[ -z "${COPR_CONFIG:-}" ]]; then
-              echo "::error::COPR_CONFIG secret is empty or missing"
+          if [[ -z "$COPR_CONFIG" ]]; then
+              echo "::error::COPR_CONFIG secret is not configured"
               exit 1
           fi
 
-          mkdir -p "${HOME}/.config"
+          mkdir -p "$HOME/.config"
 
           printf '%s\n' "$COPR_CONFIG" \
-              > "${HOME}/.config/copr"
+              > "$HOME/.config/copr"
 
-          chmod 600 "${HOME}/.config/copr"
+          chmod 600 "$HOME/.config/copr"
 
-      - name: Configure COPR package for release tag
+      - name: Verify COPR authentication
         shell: bash
         run: |
           set -Eeuo pipefail
 
-          TAG="${GITHUB_REF_NAME}"
+          copr-cli whoami
 
-          copr-cli edit-package-scm \
+      - name: Trigger COPR release build
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          copr-cli buildscm \
               hhlp/v4l2loopback \
-              --name v4l2loopback-manager \
               --clone-url https://github.com/hhlp/v4l2loopback.git \
               --commit "$TAG" \
               --spec v4l2loopback.spec \
-              --type git \
-              --method rpkg \
-              --webhook-rebuild off
-
-      - name: Verify COPR package configuration
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          copr-cli get-package \
-              hhlp/v4l2loopback \
-              --name v4l2loopback-manager
-
-      - name: Trigger COPR build
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          copr-cli build-package \
-              hhlp/v4l2loopback \
-              --name v4l2loopback-manager
+              --method rpkg
