@@ -74,9 +74,14 @@ fi
 
 %files
 %license LICENSE
+
 %doc README.md
 %doc FAQ.md
 %doc TEST.md
+%doc CONTRIBUTING.md
+%doc SECURITY.md
+%doc CHANGELOG.md
+
 %{_bindir}/v4l2loopback
 
 %changelog

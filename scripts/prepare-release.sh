@@ -4,6 +4,7 @@ set -Eeuo pipefail
 
 readonly CHANGELOG="CHANGELOG.md"
 readonly SPEC="v4l2loopback.spec"
+readonly REPO_URL="https://github.com/hhlp/v4l2loopback"
 
 usage() {
     cat <<'EOF'
@@ -11,16 +12,19 @@ Usage:
     ./scripts/prepare-release.sh VERSION
 
 Example:
-    ./scripts/prepare-release.sh 1.0.3
+    ./scripts/prepare-release.sh 1.0.4
 
 The script:
 
     1. Reads the current [Unreleased] section from CHANGELOG.md
     2. Creates the new release section
-    3. Updates Version: in v4l2loopback.spec
-    4. Generates the RPM %changelog entry
-    5. Updates CHANGELOG comparison links
-    6. Validates the SPEC with rpmspec
+    3. Recreates an empty [Unreleased] section
+    4. Updates Version: in v4l2loopback.spec
+    5. Generates the RPM %changelog entry
+    6. Updates CHANGELOG comparison links
+    7. Validates the generated CHANGELOG
+    8. Validates the generated SPEC
+    9. Validates the SPEC with rpmspec when available
 
 The script does NOT:
 
@@ -28,6 +32,7 @@ The script does NOT:
     - create a Git tag
     - push anything
     - create the GitHub Release
+    - trigger a COPR build
 
 Those operations remain explicit so the generated release can be
 reviewed before publication.
@@ -38,6 +43,10 @@ die() {
     printf 'ERROR: %s\n' "$*" >&2
     exit 1
 }
+
+# ------------------------------------------------------------
+# Arguments
+# ------------------------------------------------------------
 
 if [[ $# -ne 1 ]]; then
     usage
@@ -50,8 +59,23 @@ if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     die "Invalid version: $VERSION (expected X.Y.Z)"
 fi
 
+# ------------------------------------------------------------
+# Required files
+# ------------------------------------------------------------
+
 [[ -f "$CHANGELOG" ]] || die "$CHANGELOG not found"
 [[ -f "$SPEC" ]] || die "$SPEC not found"
+
+# ------------------------------------------------------------
+# Git repository
+# ------------------------------------------------------------
+
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
+    die "This command must be run inside a Git repository"
+
+# ------------------------------------------------------------
+# Determine current version
+# ------------------------------------------------------------
 
 CURRENT_VERSION="$(
     awk '
@@ -65,6 +89,10 @@ CURRENT_VERSION="$(
 [[ -n "$CURRENT_VERSION" ]] ||
     die "Unable to determine current Version from $SPEC"
 
+if [[ ! "$CURRENT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    die "Invalid current Version in $SPEC: $CURRENT_VERSION"
+fi
+
 if [[ "$VERSION" == "$CURRENT_VERSION" ]]; then
     die "Version $VERSION is already present in $SPEC"
 fi
@@ -72,6 +100,10 @@ fi
 if grep -Fq "## [$VERSION]" "$CHANGELOG"; then
     die "Version $VERSION already exists in $CHANGELOG"
 fi
+
+# ------------------------------------------------------------
+# Release metadata
+# ------------------------------------------------------------
 
 RELEASE_DATE="$(date '+%Y-%m-%d')"
 RPM_DATE="$(LC_ALL=C date '+%a %b %d %Y')"
@@ -83,7 +115,17 @@ RPM_CHANGELOG_EMAIL="${RPM_CHANGELOG_EMAIL:-$(git config user.email || true)}"
     RPM_CHANGELOG_NAME="hhlp"
 
 [[ -n "$RPM_CHANGELOG_EMAIL" ]] ||
-    RPM_CHANGELOG_EMAIL="hhlp@users.noreply.github.com"
+    RPM_CHANGELOG_EMAIL="2659606+hhlp@users.noreply.github.com"
+
+[[ -n "$RPM_CHANGELOG_NAME" ]] ||
+    die "Unable to determine RPM changelog name. Configure git user.name or RPM_CHANGELOG_NAME."
+
+[[ -n "$RPM_CHANGELOG_EMAIL" ]] ||
+    die "Unable to determine RPM changelog email. Configure git user.email or RPM_CHANGELOG_EMAIL."
+
+# ------------------------------------------------------------
+# Temporary working directory
+# ------------------------------------------------------------
 
 TMP_DIR="$(mktemp -d)"
 
@@ -96,7 +138,9 @@ trap cleanup EXIT
 UNRELEASED_BODY="$TMP_DIR/unreleased.txt"
 RPM_ITEMS="$TMP_DIR/rpm-items.txt"
 NEW_CHANGELOG="$TMP_DIR/CHANGELOG.md"
+NEW_CHANGELOG_LINKS="$TMP_DIR/CHANGELOG-links.md"
 NEW_SPEC="$TMP_DIR/v4l2loopback.spec"
+NEW_SPEC_WITH_CHANGELOG="$TMP_DIR/v4l2loopback-with-changelog.spec"
 
 # ------------------------------------------------------------
 # Extract [Unreleased]
@@ -121,30 +165,19 @@ awk '
     }
 ' "$CHANGELOG" > "$UNRELEASED_BODY"
 
-if ! grep -qE '^[[:space:]]*[-*+][[:space:]]+' "$UNRELEASED_BODY"; then
+grep -qE '^[[:space:]]*[-*+][[:space:]]+' "$UNRELEASED_BODY" ||
     die "CHANGELOG.md [Unreleased] contains no release entries"
-fi
 
 # ------------------------------------------------------------
 # Convert Markdown release bullets into RPM changelog bullets.
 #
-# Supported Markdown bullets:
+# Supported:
 #
 # - Entry
 # * Entry
 # + Entry
 #
-# Wrapped Markdown lines are joined into a single RPM changelog
-# entry.
-#
-# Example:
-#
-# * Changed target kernel selection to use Fedora's configured default
-#   boot kernel.
-#
-# becomes:
-#
-# - Changed target kernel selection to use Fedora's configured default boot kernel.
+# Wrapped indented lines are joined to the current RPM item.
 # ------------------------------------------------------------
 
 awk '
@@ -190,17 +223,44 @@ awk '
 
 # ------------------------------------------------------------
 # Create new CHANGELOG release section.
+#
+# The current [Unreleased] contents become the new release.
+# A fresh empty [Unreleased] section is created automatically.
 # ------------------------------------------------------------
 
 awk \
     -v version="$VERSION" \
     -v date="$RELEASE_DATE" '
     /^## \[Unreleased\]$/ {
-        print
+        print "## [Unreleased]"
+        print ""
+        print "### Added"
+        print ""
+        print "### Changed"
+        print ""
+        print "### Fixed"
+        print ""
+        print "### Security"
         print ""
         print "---"
         print ""
         print "## [" version "] - " date
+
+        in_unreleased = 1
+        next
+    }
+
+    in_unreleased && /^---$/ {
+        next
+    }
+
+    in_unreleased && /^## \[[^]]+\]/ {
+        in_unreleased = 0
+
+        print ""
+        print "---"
+        print ""
+        print
         next
     }
 
@@ -213,48 +273,56 @@ awk \
 # Update CHANGELOG comparison links.
 #
 # Before:
-# [Unreleased]: .../compare/v1.0.2...HEAD
+#
+# [Unreleased]: .../compare/v1.0.3...HEAD
 #
 # After:
-# [Unreleased]: .../compare/v1.0.3...HEAD
-# [1.0.3]: .../compare/v1.0.2...v1.0.3
+#
+# [Unreleased]: .../compare/v1.0.4...HEAD
+# [1.0.4]: .../compare/v1.0.3...v1.0.4
 # ------------------------------------------------------------
 
-python3 - "$NEW_CHANGELOG" "$VERSION" "$CURRENT_VERSION" <<'PY'
-from pathlib import Path
-import sys
+EXPECTED_UNRELEASED_LINK="$(
+    printf '%s/compare/v%s...HEAD' \
+        "$REPO_URL" \
+        "$CURRENT_VERSION"
+)"
 
-path = Path(sys.argv[1])
-version = sys.argv[2]
-previous = sys.argv[3]
+NEW_UNRELEASED_LINK="$(
+    printf '%s/compare/v%s...HEAD' \
+        "$REPO_URL" \
+        "$VERSION"
+)"
 
-text = path.read_text()
+NEW_RELEASE_LINK="$(
+    printf '%s/compare/v%s...v%s' \
+        "$REPO_URL" \
+        "$CURRENT_VERSION" \
+        "$VERSION"
+)"
 
-old_unreleased = (
-    f"[Unreleased]: "
-    f"https://github.com/hhlp/v4l2loopback/compare/"
-    f"v{previous}...HEAD"
-)
+grep -Fq "[Unreleased]: $EXPECTED_UNRELEASED_LINK" "$NEW_CHANGELOG" ||
+    die "Unable to locate expected [Unreleased] comparison link: $EXPECTED_UNRELEASED_LINK"
 
-new_links = (
-    f"[Unreleased]: "
-    f"https://github.com/hhlp/v4l2loopback/compare/"
-    f"v{version}...HEAD\n"
-    f"[{version}]: "
-    f"https://github.com/hhlp/v4l2loopback/compare/"
-    f"v{previous}...v{version}"
-)
+awk \
+    -v old="[Unreleased]: $EXPECTED_UNRELEASED_LINK" \
+    -v unreleased="[Unreleased]: $NEW_UNRELEASED_LINK" \
+    -v release="[$VERSION]: $NEW_RELEASE_LINK" '
+    $0 == old {
+        print unreleased
+        print release
+        next
+    }
 
-if old_unreleased not in text:
-    raise SystemExit(
-        "ERROR: Unable to locate the expected [Unreleased] comparison link"
-    )
+    {
+        print
+    }
+' "$NEW_CHANGELOG" > "$NEW_CHANGELOG_LINKS"
 
-path.write_text(text.replace(old_unreleased, new_links, 1))
-PY
+mv "$NEW_CHANGELOG_LINKS" "$NEW_CHANGELOG"
 
 # ------------------------------------------------------------
-# Update SPEC Version.
+# Update SPEC Version
 # ------------------------------------------------------------
 
 awk \
@@ -270,10 +338,20 @@ awk \
 ' "$SPEC" > "$NEW_SPEC"
 
 # ------------------------------------------------------------
-# Add RPM %changelog entry.
+# Generate RPM %changelog header
 # ------------------------------------------------------------
 
-RPM_HEADER="* ${RPM_DATE} ${RPM_CHANGELOG_NAME} <${RPM_CHANGELOG_EMAIL}> - ${VERSION}-1"
+RPM_HEADER="$(
+    printf '* %s %s <%s> - %s-1' \
+        "$RPM_DATE" \
+        "$RPM_CHANGELOG_NAME" \
+        "$RPM_CHANGELOG_EMAIL" \
+        "$VERSION"
+)"
+
+# ------------------------------------------------------------
+# Add RPM %changelog entry
+# ------------------------------------------------------------
 
 awk \
     -v header="$RPM_HEADER" \
@@ -292,12 +370,77 @@ awk \
         close(items)
         print ""
     }
-' "$NEW_SPEC" > "${NEW_SPEC}.with-changelog"
+' "$NEW_SPEC" > "$NEW_SPEC_WITH_CHANGELOG"
 
-mv "${NEW_SPEC}.with-changelog" "$NEW_SPEC"
+mv "$NEW_SPEC_WITH_CHANGELOG" "$NEW_SPEC"
 
 # ------------------------------------------------------------
-# Validate generated SPEC before touching repository files.
+# Validate generated CHANGELOG
+# ------------------------------------------------------------
+
+grep -Fq "## [$VERSION] - $RELEASE_DATE" "$NEW_CHANGELOG" ||
+    die "Generated CHANGELOG does not contain release $VERSION"
+
+grep -Fq "## [Unreleased]" "$NEW_CHANGELOG" ||
+    die "Generated CHANGELOG does not contain [Unreleased]"
+
+grep -Fq "### Added" "$NEW_CHANGELOG" ||
+    die "Generated CHANGELOG does not contain Added section"
+
+grep -Fq "### Changed" "$NEW_CHANGELOG" ||
+    die "Generated CHANGELOG does not contain Changed section"
+
+grep -Fq "### Fixed" "$NEW_CHANGELOG" ||
+    die "Generated CHANGELOG does not contain Fixed section"
+
+grep -Fq "### Security" "$NEW_CHANGELOG" ||
+    die "Generated CHANGELOG does not contain Security section"
+
+grep -Fq "[Unreleased]: $NEW_UNRELEASED_LINK" "$NEW_CHANGELOG" ||
+    die "Generated CHANGELOG has invalid [Unreleased] link"
+
+grep -Fq "[$VERSION]: $NEW_RELEASE_LINK" "$NEW_CHANGELOG" ||
+    die "Generated CHANGELOG has no comparison link for $VERSION"
+
+# ------------------------------------------------------------
+# Validate generated SPEC version
+# ------------------------------------------------------------
+
+GENERATED_VERSION="$(
+    awk '
+        $1 == "Version:" {
+            print $2
+            exit
+        }
+    ' "$NEW_SPEC"
+)"
+
+[[ -n "$GENERATED_VERSION" ]] ||
+    die "Unable to read Version from generated SPEC"
+
+[[ "$GENERATED_VERSION" == "$VERSION" ]] ||
+    die "Generated SPEC version is $GENERATED_VERSION instead of $VERSION"
+
+# ------------------------------------------------------------
+# Validate generated RPM changelog
+# ------------------------------------------------------------
+
+grep -Fq "$RPM_HEADER" "$NEW_SPEC" ||
+    die "Generated SPEC does not contain the expected RPM changelog entry"
+
+# ------------------------------------------------------------
+# Validate %changelog exists exactly once
+# ------------------------------------------------------------
+
+CHANGELOG_COUNT="$(
+    grep -c '^%changelog$' "$NEW_SPEC" || true
+)"
+
+[[ "$CHANGELOG_COUNT" -eq 1 ]] ||
+    die "Generated SPEC must contain exactly one %changelog section"
+
+# ------------------------------------------------------------
+# Validate generated SPEC with rpmspec
 # ------------------------------------------------------------
 
 if command -v rpmspec >/dev/null 2>&1; then
@@ -310,32 +453,54 @@ fi
 
 # ------------------------------------------------------------
 # Install generated files.
+#
+# Repository files are modified only after every transformation
+# and validation step has completed successfully.
 # ------------------------------------------------------------
 
 cp "$NEW_CHANGELOG" "$CHANGELOG"
 cp "$NEW_SPEC" "$SPEC"
 
+# ------------------------------------------------------------
+# Summary
+# ------------------------------------------------------------
+
 printf '\n'
-printf 'Release preparation complete.\n'
+printf '%s\n' 'Release preparation complete.'
 printf '\n'
+
 printf '  Previous version : %s\n' "$CURRENT_VERSION"
 printf '  New version      : %s\n' "$VERSION"
 printf '  Release date     : %s\n' "$RELEASE_DATE"
-printf '\n'
+printf '  RPM changelog    : %s <%s>\n' \
+    "$RPM_CHANGELOG_NAME" \
+    "$RPM_CHANGELOG_EMAIL"
 
-printf 'Updated:\n'
+printf '\n'
+printf '%s\n' 'Updated:'
 printf '  %s\n' "$CHANGELOG"
 printf '  %s\n' "$SPEC"
-printf '\n'
 
-printf 'Review the result:\n\n'
+printf '\n'
+printf '%s\n' 'Review the result:'
+printf '\n'
 printf '  git diff -- %s %s\n' "$CHANGELOG" "$SPEC"
+
+printf '\n'
+printf '%s\n' 'Run validation:'
+printf '\n'
+printf '%s\n' '  bash -n scripts/prepare-release.sh'
+printf '%s\n' '  shellcheck scripts/prepare-release.sh'
+printf '  rpmspec -P %s >/dev/null\n' "$SPEC"
+
+printf '\n'
+printf '%s\n' 'If everything is correct:'
 printf '\n'
 
-printf 'If everything is correct:\n\n'
 printf '  git add %s %s\n' "$CHANGELOG" "$SPEC"
 printf '  git commit -m "chore: prepare v%s release"\n' "$VERSION"
-printf '  git tag -a "v%s" -m "v%s"\n' "$VERSION" "$VERSION"
-printf '  git push origin main\n'
+printf '  git tag -s "v%s" -m "v%s"\n' "$VERSION" "$VERSION"
+printf '%s\n' '  git push origin main'
 printf '  git push origin "v%s"\n' "$VERSION"
+
 printf '\n'

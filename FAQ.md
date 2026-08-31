@@ -4,7 +4,7 @@
 <!-- TOC START -->
 ## Table of Contents
 
-- [Which kernel does version 1.0.2 target?](#which-kernel-does-version-102-target)
+- [Which kernel does the manager target?](#which-kernel-does-the-manager-target)
 - [Why use the default boot kernel?](#why-use-the-default-boot-kernel)
 - [Does the target kernel have to be running?](#does-the-target-kernel-have-to-be-running)
 - [What if matching `kernel-devel` is missing?](#what-if-matching-kernel-devel-is-missing)
@@ -16,7 +16,9 @@
 - [What happens if it is signed by another key?](#what-happens-if-it-is-signed-by-another-key)
 - [Does `rebuild` always compile?](#does-rebuild-always-compile)
 - [Where are the keys?](#where-are-the-keys)
+- [What does `status` check?](#what-does-status-check)
 - [How do I check Secure Boot and MOK enrollment?](#how-do-i-check-secure-boot-and-mok-enrollment)
+- [Why can `mokutil --test-key` say enrolled but return 1?](#why-can-mokutil---test-key-say-enrolled-but-return-1)
 - [How do I inspect the target module?](#how-do-i-inspect-the-target-module)
 - [What happens after `dnf upgrade` installs a new kernel?](#what-happens-after-dnf-upgrade-installs-a-new-kernel)
 - [Is systemd executed at every boot?](#is-systemd-executed-at-every-boot)
@@ -31,7 +33,7 @@
 
 <!-- TOC END -->
 
-## Which kernel does version 1.0.2 target?
+## Which kernel does the manager target?
 
 The Fedora **default boot kernel**, not simply the newest installed
 `kernel-devel`.
@@ -75,6 +77,10 @@ It checks:
 ```
 
 and verifies its signer with `modinfo -F signer`.
+
+It also checks MOK enrollment so trust problems can be reported separately.
+Missing enrollment does not force a rebuild when the `.ko` already has the
+expected signer.
 
 A valid signer contains:
 
@@ -138,14 +144,51 @@ already exists and has the expected signer, it returns without compiling.
 
 The private key should remain mode `0600`.
 
+## What does `status` check?
+
+Run:
+
+```bash
+v4l2loopback status
+```
+
+It reports the Fedora default boot kernel, Secure Boot state, local signing-key
+files, MOK enrollment, target-module existence, module signer, and whether the
+module is loaded when the target kernel is the running kernel.
+
+A healthy setup ends with:
+
+```text
+✅ v4l2loopback signing state is ready.
+```
+
 ## How do I check Secure Boot and MOK enrollment?
 
 ```bash
+v4l2loopback status
+
 mokutil --sb-state
 
 mokutil --list-enrolled |
     grep -A5 -B5 'V4L2Loopback Module Signing'
 ```
+
+The manager's `status` command is the preferred combined check.
+
+## Why can `mokutil --test-key` say enrolled but return 1?
+
+On some Fedora/mokutil combinations, this command can print:
+
+```text
+/path/to/v4l.der is already enrolled
+```
+
+while still exiting with status `1`, for example when access to the kernel
+trusted keyring fails.
+
+The manager does not rely only on that exit status. It runs the test in the C
+locale and checks the explicit `is already enrolled` result so an enrolled
+certificate is not reported as missing.
 
 ## How do I inspect the target module?
 
@@ -208,9 +251,30 @@ through `sudo` otherwise. RPM/systemd execution is root-owned.
 
 ## Do BIOS/UEFI updates require a rebuild?
 
-Usually no. First verify Secure Boot, MOK enrollment and the module signer. If
-the MOK enrollment was lost but the existing DER certificate remains, re-enroll
-the same certificate instead of generating a new key.
+Usually no. First run:
+
+```bash
+v4l2loopback status
+```
+
+If the module exists and is correctly signed but the MOK enrollment was lost,
+the module itself does not need rebuilding. Re-enroll the **existing**
+certificate:
+
+```bash
+sudo v4l2loopback genkey
+```
+
+`genkey` preserves a complete existing key pair and imports the existing DER
+certificate when enrollment is missing. Then reboot manually:
+
+```bash
+sudo reboot
+```
+
+Complete enrollment in the blue MOK Manager screen and run `v4l2loopback
+status` again. Do not regenerate the key merely because firmware/BIOS changes
+affected MOK enrollment.
 
 ## What if `/dev/video10` is missing?
 

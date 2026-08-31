@@ -5,6 +5,7 @@
 #
 # Commands:
 #   genkey
+#   status
 #   needs-rebuild
 #   rebuild
 #   reinstall
@@ -130,6 +131,153 @@ module_signature_is_valid() {
 }
 
 # ============================================================
+# MOK ENROLLMENT CHECK
+#
+# Return:
+#   0 -> local signing certificate exists and is enrolled
+#   1 -> certificate is missing or is not currently enrolled
+# ============================================================
+
+mok_certificate_is_enrolled() {
+    local output
+
+    [[ -f "$KEY_PEM" ]] || return 1
+
+    # Some mokutil/Fedora combinations can print "is already enrolled"
+    # while still returning exit status 1 because the kernel trusted
+    # keyring cannot be queried. For MOK enrollment, trust mokutil's
+    # explicit enrollment result rather than that unreliable exit code.
+    if [[ $EUID -eq 0 ]]; then
+        output="$(
+            LC_ALL=C mokutil --test-key "$KEY_PEM" 2>&1 || true
+        )"
+    else
+        output="$(
+            sudo env LC_ALL=C mokutil --test-key "$KEY_PEM" 2>&1 || true
+        )"
+    fi
+
+    grep -Fq 'is already enrolled' <<<"$output"
+}
+
+# ============================================================
+# STATUS
+# ============================================================
+
+show_status() {
+    local kver
+    local module_path
+    local signer
+    local result=0
+    local sb_state
+
+    echo "=== 🔎 v4l2loopback status ==="
+    echo
+
+    kver="$(get_target_kernel)"
+    module_path="/lib/modules/$kver/$MODULE_SUBDIR/${MODULE_NAME}.ko"
+
+    echo "🐧 Fedora default boot kernel:"
+    echo "   $kver"
+    echo
+
+    echo "🔐 Secure Boot:"
+    if command -v mokutil >/dev/null 2>&1; then
+        sb_state="$(mokutil --sb-state 2>&1 || true)"
+
+        if [[ -n "$sb_state" ]]; then
+            echo "   $sb_state"
+        else
+            echo "   ⚠️ Unable to determine Secure Boot state."
+            result=1
+        fi
+    else
+        echo "   ❌ mokutil is not installed."
+        result=1
+    fi
+    echo
+
+    echo "🗝 Signing key files:"
+    if [[ -f "$KEY_PRIV" && -f "$KEY_PEM" ]]; then
+        echo "   ✅ Private key: $KEY_PRIV"
+        echo "   ✅ Certificate: $KEY_PEM"
+    elif [[ ! -f "$KEY_PRIV" && ! -f "$KEY_PEM" ]]; then
+        echo "   ❌ Signing key and certificate are missing."
+        result=1
+    else
+        echo "   ❌ Signing key files are incomplete."
+        [[ -f "$KEY_PRIV" ]] && echo "   ✅ Private key: $KEY_PRIV"
+        [[ ! -f "$KEY_PRIV" ]] && echo "   ❌ Private key missing: $KEY_PRIV"
+        [[ -f "$KEY_PEM" ]] && echo "   ✅ Certificate: $KEY_PEM"
+        [[ ! -f "$KEY_PEM" ]] && echo "   ❌ Certificate missing: $KEY_PEM"
+        result=1
+    fi
+    echo
+
+    echo "🔏 MOK enrollment:"
+    if [[ ! -f "$KEY_PEM" ]]; then
+        echo "   ❌ Local signing certificate is not available."
+        result=1
+    elif mok_certificate_is_enrolled; then
+        echo "   ✅ Signing certificate is enrolled."
+    else
+        echo "   ❌ Signing certificate is NOT enrolled."
+        echo "   → Run: sudo $PROGRAM_PATH genkey"
+        echo "   → Then reboot manually: sudo reboot"
+        echo "   → Complete MOK enrollment in the blue MOK Manager screen."
+        result=1
+    fi
+    echo
+
+    echo "📦 Module:"
+    echo "   $module_path"
+
+    if [[ ! -f "$module_path" ]]; then
+        echo "   ❌ Module does not exist."
+        echo "   → Rebuild required."
+        result=1
+    else
+        echo "   ✅ Module exists."
+        echo
+
+        echo "✍️ Module signature:"
+        signer="$(modinfo -F signer "$module_path" 2>/dev/null || true)"
+
+        if [[ -z "$signer" ]]; then
+            echo "   ❌ Module is unsigned or its signer cannot be read."
+            result=1
+        elif module_signature_is_valid "$module_path"; then
+            echo "   Signer: $signer"
+            echo "   ✅ Module is signed with the expected certificate."
+        else
+            echo "   Signer: $signer"
+            echo "   ❌ Module is signed by another certificate."
+            result=1
+        fi
+    fi
+    echo
+
+    echo "🔌 Running-kernel module:"
+    if [[ "$kver" != "$(uname -r)" ]]; then
+        echo "   ℹ️ Default boot kernel is not the running kernel."
+        echo "   Running: $(uname -r)"
+    elif lsmod | grep -q "^${MODULE_NAME}[[:space:]]"; then
+        echo "   ✅ $MODULE_NAME is loaded."
+    else
+        echo "   ℹ️ $MODULE_NAME is not currently loaded."
+    fi
+    echo
+
+    if [[ "$result" -eq 0 ]]; then
+        echo "✅ v4l2loopback signing state is ready."
+    else
+        echo "⚠️ v4l2loopback requires attention."
+    fi
+
+    return "$result"
+}
+
+# ============================================================
 # NEEDS REBUILD
 #
 # Exit codes:
@@ -193,7 +341,37 @@ needs_rebuild() {
     fi
 
     echo "✅ Module exists and is correctly signed."
-    echo "ℹ️ Nothing to rebuild."
+    echo
+
+    echo "🔏 Checking MOK enrollment..."
+
+    if [[ ! -f "$KEY_PEM" ]]; then
+        echo "⚠️ Local signing certificate is not available:"
+        echo "   $KEY_PEM"
+        echo
+        echo "ℹ️ The module itself does not need rebuilding."
+        echo "⚠️ MOK enrollment cannot be verified."
+        return 1
+    fi
+
+    if mok_certificate_is_enrolled; then
+        echo "✅ Signing certificate is enrolled."
+        echo "ℹ️ Nothing to rebuild."
+        return 1
+    fi
+
+    echo "⚠️ Signing certificate is NOT enrolled."
+    echo
+    echo "The module is already correctly built and signed."
+    echo "Rebuilding it would not fix the trust problem."
+    echo
+    echo "Re-enroll the existing certificate with:"
+    echo "   sudo $PROGRAM_PATH genkey"
+    echo
+    echo "Then reboot manually:"
+    echo "   sudo reboot"
+    echo
+    echo "Complete MOK enrollment in the blue MOK Manager screen."
     return 1
 }
 
@@ -202,18 +380,51 @@ needs_rebuild() {
 # ============================================================
 
 gen_signing_key() {
-    echo "=== 🔑 Generating Secure Boot signing key ==="
+    local generated=false
+
+    echo "=== 🔑 Secure Boot signing key / MOK enrollment ==="
     echo
 
     sudo mkdir -p "$KEY_DIR"
 
-    if [[ -f "$KEY_PRIV" || -f "$KEY_PEM" ]]; then
-        echo "⚠️ Signing key already exists:"
+    # Refuse to overwrite a partial key pair. Losing the private key while
+    # keeping the certificate (or vice versa) must be handled explicitly.
+    if [[ -f "$KEY_PRIV" && ! -f "$KEY_PEM" ]]; then
+        echo "❌ Signing key files are incomplete."
+        echo
+        echo "Private key exists:"
+        echo "   $KEY_PRIV"
+        echo
+        echo "Certificate is missing:"
+        echo "   $KEY_PEM"
+        echo
+        echo "Refusing to generate a new key automatically."
+        return 1
+    fi
+
+    if [[ ! -f "$KEY_PRIV" && -f "$KEY_PEM" ]]; then
+        echo "❌ Signing key files are incomplete."
+        echo
+        echo "Certificate exists:"
+        echo "   $KEY_PEM"
+        echo
+        echo "Private key is missing:"
+        echo "   $KEY_PRIV"
+        echo
+        echo "Refusing to generate a new key automatically."
+        return 1
+    fi
+
+    if [[ -f "$KEY_PRIV" && -f "$KEY_PEM" ]]; then
+        echo "ℹ️ Existing signing key will be preserved:"
         echo "   $KEY_DIR"
         echo
 
         sudo ls -l "$KEY_DIR"/v4l.* 2>/dev/null || true
     else
+        echo "🔨 Generating new signing key..."
+        echo
+
         sudo openssl req \
             -new \
             -x509 \
@@ -227,13 +438,35 @@ gen_signing_key() {
 
         sudo chmod 600 "$KEY_PRIV"
 
+        generated=true
+
         echo
         echo "✅ Signing key generated:"
         sudo ls -l "$KEY_DIR"/v4l.*
     fi
 
     echo
-    echo "🔐 Importing certificate into MOK..."
+    echo "🔏 Checking MOK enrollment..."
+
+    if mok_certificate_is_enrolled; then
+        echo "✅ Signing certificate is already enrolled."
+        echo
+
+        if [[ "$generated" == true ]]; then
+            echo "ℹ️ No additional enrollment request is required."
+        else
+            echo "ℹ️ Existing key and enrollment are valid."
+            echo "ℹ️ Nothing to do."
+        fi
+
+        return 0
+    fi
+
+    echo "⚠️ Signing certificate is not currently enrolled."
+    echo
+    echo "🔐 Scheduling enrollment of the EXISTING certificate..."
+    echo
+    echo "The private key will NOT be regenerated."
     echo
     echo "You will be asked to create a temporary password."
     echo "This password is required once in the MOK Manager"
@@ -249,9 +482,13 @@ gen_signing_key() {
     echo
     echo "   mokutil --list-new"
     echo
-    echo "Then reboot:"
+    echo "Then reboot manually:"
     echo
     echo "   sudo reboot"
+    echo
+    echo "After enrollment, verify with:"
+    echo
+    echo "   mokutil --test-key $KEY_PEM"
 }
 
 # ============================================================
@@ -307,6 +544,22 @@ rebuild_module() {
     if [[ -f "$installed_module" ]]; then
         if module_signature_is_valid "$installed_module"; then
             echo "✅ Existing module is correctly signed."
+            echo
+
+            if [[ -f "$KEY_PEM" ]] && ! mok_certificate_is_enrolled; then
+                echo "⚠️ Signing certificate is NOT enrolled in MOK."
+                echo "ℹ️ Rebuilding would not fix this trust problem."
+                echo
+                echo "Re-enroll the existing certificate with:"
+                echo "   sudo $PROGRAM_PATH genkey"
+                echo
+                echo "Then reboot manually:"
+                echo "   sudo reboot"
+                echo
+                echo "Complete MOK enrollment in the blue MOK Manager screen."
+                return 0
+            fi
+
             echo "ℹ️ Nothing to rebuild."
             return 0
         fi
@@ -937,8 +1190,17 @@ Usage:
 Commands:
 
     genkey
-        Generate the Secure Boot signing key and request
-        MOK enrollment.
+        Generate the Secure Boot signing key when it does not exist.
+
+        If the key already exists, preserve it and verify MOK
+        enrollment. If enrollment was lost (for example after a
+        firmware/BIOS change), request re-enrollment of the existing
+        certificate without regenerating the key.
+
+    status
+        Show the Fedora default boot kernel, Secure Boot state,
+        signing-key files, MOK enrollment, module presence and
+        module signature.
 
     needs-rebuild
         Check whether v4l2loopback.ko exists for the Fedora
@@ -978,7 +1240,11 @@ Commands:
             rebuild is executed
 
         Exists and correctly signed:
-            nothing is executed
+            nothing is rebuilt
+
+        If the module is correctly signed but its MOK certificate
+        is not enrolled, rebuild is skipped and genkey is recommended
+        to re-enroll the existing certificate.
 
     disable-systemd
         Disable and remove the systemd service.
@@ -1013,6 +1279,10 @@ cmd="${1:-help}"
 case "$cmd" in
     genkey)
         gen_signing_key
+        ;;
+
+    status)
+        show_status
         ;;
 
     needs-rebuild)

@@ -7,6 +7,37 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Added the `status` command to report the Fedora default boot kernel, Secure
+  Boot state, signing-key files, MOK enrollment, target-module presence,
+  module signer, and running-kernel module state.
+- Added explicit MOK enrollment verification before deciding whether a valid
+  signed module requires attention.
+- Added recovery guidance for BIOS/UEFI or firmware changes that can leave the
+  existing signing certificate unenrolled.
+
+### Changed
+
+- `genkey` now preserves an existing complete signing key pair and reuses the
+  existing DER certificate when MOK enrollment must be restored.
+- MOK enrollment detection now handles Fedora/mokutil combinations where
+  `mokutil --test-key` can print `is already enrolled` while still returning
+  exit status `1`.
+- `needs-rebuild` now distinguishes module validity from MOK trust: a module
+  that already exists and has the expected signer is not rebuilt merely
+  because its MOK enrollment is missing.
+- `rebuild` now avoids unnecessary compilation when the module is already
+  correctly signed and instead directs the user to re-enroll the existing
+  certificate when needed.
+- MOK recovery instructions now make the reboot step explicitly manual.
+
+### Fixed
+
+- Fixed false `Signing certificate is NOT enrolled` reports caused by relying
+  only on the exit status of `mokutil --test-key`.
+- Avoided regenerating signing keys as a response to lost MOK enrollment.
+
 ---
 
 ## [1.0.3] - 2026-08-28
@@ -131,6 +162,10 @@ v1.0.1
 v1.0.2
    │
    │  Fedora default boot kernel selection
+   ▼
+v1.0.3
+   │
+   │  Documentation, CI and release automation
    ▼
 Unreleased
 ```

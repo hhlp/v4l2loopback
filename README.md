@@ -5,7 +5,7 @@
 [![Fedora](https://img.shields.io/badge/Fedora-supported-blue?logo=fedora&logoColor=white)](https://fedoraproject.org/)
 [![COPR](https://img.shields.io/badge/COPR-hhlp%2Fv4l2loopback-blue)](https://copr.fedorainfracloud.org/coprs/hhlp/v4l2loopback/)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/badge/release-v1.0.2-blue)](https://github.com/hhlp/v4l2loopback/releases/tag/v1.0.2)
+[![Release](https://img.shields.io/badge/release-v1.0.3-blue)](https://github.com/hhlp/v4l2loopback/releases/tag/v1.0.3)
 
 `v4l2loopback-manager` builds, signs, installs, verifies, rebuilds, and removes the upstream [`v4l2loopback`](https://github.com/v4l2loopback/v4l2loopback) kernel module on Fedora systems, including systems with **UEFI Secure Boot enabled**.
 
@@ -19,7 +19,8 @@ The kernel module itself is **not distributed by this RPM**. It is built locally
 - Detects the target kernel using `grubby --default-kernel`.
 - Supports UEFI Secure Boot using a Machine Owner Key (MOK).
 - Signs `v4l2loopback.ko` using the kernel `sign-file` utility.
-- Verifies both module existence and expected certificate signer.
+- Verifies module existence, expected certificate signer, and current MOK enrollment.
+- Provides a `status` command for a complete Secure Boot/signing health check.
 - Rebuilds only when the module is missing or has an invalid signature.
 - Provides optional systemd integration for automatic boot-time verification.
 - Keeps module options persistent through `modprobe.d`.
@@ -45,13 +46,23 @@ command -v v4l2loopback
 v4l2loopback help
 ```
 
-Generate the Secure Boot signing key:
+Prepare the Secure Boot signing key and MOK enrollment:
 
 ```bash
 sudo v4l2loopback genkey
 ```
 
-After enrolling the MOK and rebooting, build and install the module:
+If enrollment is requested, reboot **manually** and complete enrollment in the
+blue MOK Manager screen. Existing complete signing keys are preserved; the
+manager does not regenerate them merely because enrollment is missing.
+
+Check the current signing state:
+
+```bash
+v4l2loopback status
+```
+
+After MOK enrollment is complete, build and install the module:
 
 ```bash
 sudo v4l2loopback rebuild
@@ -126,17 +137,18 @@ At boot, the optional systemd service performs a simple decision:
 - [Features](#️-features)
 - [Quick Start](#-quick-start)
 - [How It Works](#️-how-it-works)
-- [Version 1.0.2 Design](#version-102-design)
+- [Current Design](#current-design)
 - [Requirements](#requirements)
 - [RPM / COPR Installation](#rpm--copr-installation)
 - [Commands](#commands)
-- [Secure Boot Key](#secure-boot-key)
+- [Secure Boot / MOK](#secure-boot--mok)
 - [Source Tree](#source-tree)
 - [Kernel Selection](#kernel-selection)
 - [Rebuild Decision](#rebuild-decision)
 - [systemd Integration](#systemd-integration)
 - [Persistent Module Configuration](#persistent-module-configuration)
 - [Verification](#verification)
+- [BIOS / UEFI / Firmware Recovery](#bios--uefi--firmware-recovery)
 - [Kernel Updates](#kernel-updates)
 - [Removal](#removal)
 - [Documentation](#documentation)
@@ -146,7 +158,7 @@ At boot, the optional systemd service performs a simple decision:
 
 ---
 
-## Version 1.0.2 Design
+## Current Design
 
 The manager deliberately has **no DNF hook and no systemd timer**.
 
@@ -179,10 +191,15 @@ For the target kernel it expects:
 /lib/modules/<default-boot-kernel>/updates/v4l2loopback.ko
 ```
 
-`needs-rebuild` validates two things:
+`needs-rebuild` validates the target module and keeps module validity separate
+from MOK trust:
 
 1. The module exists.
 2. `modinfo -F signer` contains `V4L2Loopback Module Signing`.
+3. MOK enrollment is checked so a lost enrollment can be reported clearly.
+
+A missing MOK enrollment does **not** make an already valid `.ko` require a
+rebuild. Rebuilding with the same unenrolled key would not restore trust.
 
 Its exit status is intentionally designed for systemd `ExecCondition=`:
 
@@ -288,6 +305,7 @@ Available commands:
 
 ```text
 genkey
+status
 needs-rebuild
 rebuild
 reinstall
@@ -311,7 +329,7 @@ v4l2loopback help
 
 ---
 
-## Secure Boot Key
+## Secure Boot / MOK
 
 Generate the project MOK:
 
@@ -340,12 +358,47 @@ The private key:
 
 must remain private and should **never be committed, uploaded, or attached to a GitHub issue**.
 
-Complete MOK enrollment after reboot, then verify:
+`genkey` is intentionally conservative:
+
+```text
+both files missing
+    -> generate a new key pair
+
+both files present
+    -> preserve the existing key pair
+
+only one file present
+    -> stop; do not overwrite the partial key pair
+
+certificate not enrolled
+    -> import the existing DER certificate for MOK enrollment
+```
+
+If enrollment is requested, reboot manually:
+
+```bash
+sudo reboot
+```
+
+Then complete enrollment in the blue MOK Manager screen.
+
+Verify the current state with the manager:
+
+```bash
+v4l2loopback status
+```
+
+You can also inspect the enrolled certificates directly:
 
 ```bash
 mokutil --list-enrolled |
     grep -A5 -B5 'V4L2Loopback Module Signing'
 ```
+
+> On some Fedora/mokutil combinations, `mokutil --test-key` may print
+> `is already enrolled` while still returning exit status `1`. The manager
+> therefore checks the explicit enrollment result instead of trusting that
+> exit code alone.
 
 ---
 
@@ -600,7 +653,21 @@ These settings provide a persistent virtual camera configuration across boots.
 
 ## Verification
 
-Determine the Fedora default boot kernel:
+Start with the built-in health check:
+
+```bash
+v4l2loopback status
+```
+
+A healthy Secure Boot setup reports the signing certificate as enrolled, the
+target module as present and signed by `V4L2Loopback Module Signing`, and ends
+with:
+
+```text
+✅ v4l2loopback signing state is ready.
+```
+
+Determine the Fedora default boot kernel manually:
 
 ```bash
 TARGET="$(sudo grubby --default-kernel)"
@@ -639,6 +706,52 @@ A normal installation should expose the configured virtual camera, by default:
 
 ```text
 VirtualCam
+```
+
+---
+
+## BIOS / UEFI / Firmware Recovery
+
+A BIOS/UEFI or firmware update can change Secure Boot/MOK trust state without
+removing the local key files or the already signed module.
+
+Typical state:
+
+```text
+v4l.key exists
+v4l.der exists
+v4l2loopback.ko exists
+module signer is correct
+MOK enrollment is missing
+```
+
+In that case, **do not regenerate the key and do not rebuild the module just to
+restore trust**. Re-enroll the existing certificate:
+
+```bash
+sudo v4l2loopback genkey
+```
+
+The manager preserves the existing key pair and stages the existing
+`v4l.der` for enrollment. Then reboot manually:
+
+```bash
+sudo reboot
+```
+
+Complete the MOK enrollment in the blue MOK Manager screen and verify:
+
+```bash
+v4l2loopback status
+```
+
+The expected result is:
+
+```text
+🔏 MOK enrollment:
+   ✅ Signing certificate is enrolled.
+
+✅ v4l2loopback signing state is ready.
 ```
 
 ---
@@ -765,7 +878,7 @@ See [`LICENSE`](LICENSE) for the complete license text.
 
 ---
 
-**Current release:** `v1.0.2`
+**Current release:** `v1.0.3`
 **Platform:** Fedora Linux
 **Manager:** `/usr/bin/v4l2loopback`
 **Kernel target:** Fedora default boot kernel via `grubby --default-kernel`
