@@ -9,6 +9,18 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Security
+
+---
+
+## [1.0.4] - 2026-08-31
+
+### Added
+
 - Added the `status` command to report the Fedora default boot kernel, Secure
   Boot state, signing-key files, MOK enrollment, target-module presence,
   module signer, and running-kernel module state.
@@ -37,6 +49,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
 - Fixed false `Signing certificate is NOT enrolled` reports caused by relying
   only on the exit status of `mokutil --test-key`.
 - Avoided regenerating signing keys as a response to lost MOK enrollment.
+
+
 
 ---
 
@@ -172,7 +186,8 @@ Unreleased
 
 ---
 
-[Unreleased]: https://github.com/hhlp/v4l2loopback/compare/v1.0.3...HEAD
+[Unreleased]: https://github.com/hhlp/v4l2loopback/compare/v1.0.4...HEAD
+[1.0.4]: https://github.com/hhlp/v4l2loopback/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/hhlp/v4l2loopback/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/hhlp/v4l2loopback/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/hhlp/v4l2loopback/compare/v1.0.0...v1.0.1

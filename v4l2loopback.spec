@@ -1,5 +1,5 @@
 Name:           v4l2loopback-manager
-Version:        1.0.3
+Version:        1.0.4
 Release:        1%{?dist}
 Summary:        Secure Boot manager for v4l2loopback on Fedora
 
@@ -85,6 +85,18 @@ fi
 %{_bindir}/v4l2loopback
 
 %changelog
+* Mon Aug 31 2026 hhlp <2659606+hhlp@users.noreply.github.com> - 1.0.4-1
+- Added the `status` command to report the Fedora default boot kernel, Secure Boot state, signing-key files, MOK enrollment, target-module presence, module signer, and running-kernel module state.
+- Added explicit MOK enrollment verification before deciding whether a valid signed module requires attention.
+- Added recovery guidance for BIOS/UEFI or firmware changes that can leave the existing signing certificate unenrolled.
+- `genkey` now preserves an existing complete signing key pair and reuses the existing DER certificate when MOK enrollment must be restored.
+- MOK enrollment detection now handles Fedora/mokutil combinations where `mokutil --test-key` can print `is already enrolled` while still returning exit status `1`.
+- `needs-rebuild` now distinguishes module validity from MOK trust: a module that already exists and has the expected signer is not rebuilt merely because its MOK enrollment is missing.
+- `rebuild` now avoids unnecessary compilation when the module is already correctly signed and instead directs the user to re-enroll the existing certificate when needed.
+- MOK recovery instructions now make the reboot step explicitly manual.
+- Fixed false `Signing certificate is NOT enrolled` reports caused by relying only on the exit status of `mokutil --test-key`.
+- Avoided regenerating signing keys as a response to lost MOK enrollment.
+
 * Fri Aug 28 2026 hhlp <louzaoh@gmail.com> - 1.0.3-1
 - Added `CHANGELOG.md` to maintain a structured release history following Keep a Changelog conventions.
 - Added `CONTRIBUTING.md` with development requirements, contribution workflow, testing guidelines, RPM validation, commit conventions, and security guidance.
