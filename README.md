@@ -5,7 +5,7 @@
 [![Fedora](https://img.shields.io/badge/Fedora-supported-blue?logo=fedora&logoColor=white)](https://fedoraproject.org/)
 [![COPR](https://img.shields.io/badge/COPR-hhlp%2Fv4l2loopback-blue)](https://copr.fedorainfracloud.org/coprs/hhlp/v4l2loopback/)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/badge/release-v1.0.3-blue)](https://github.com/hhlp/v4l2loopback/releases/tag/v1.0.3)
+[![Release](https://img.shields.io/badge/release-v1.0.4-blue)](https://github.com/hhlp/v4l2loopback/releases/tag/v1.0.4)
 
 `v4l2loopback-manager` builds, signs, installs, verifies, rebuilds, and removes the upstream [`v4l2loopback`](https://github.com/v4l2loopback/v4l2loopback) kernel module on Fedora systems, including systems with **UEFI Secure Boot enabled**.
 
@@ -24,7 +24,7 @@ The kernel module itself is **not distributed by this RPM**. It is built locally
 - Rebuilds only when the module is missing or has an invalid signature.
 - Provides optional systemd integration for automatic boot-time verification.
 - Keeps module options persistent through `modprobe.d`.
-- Supports clean module uninstall and systemd removal.
+- Supports explicit local-resource uninstall, systemd cleanup, and complete RPM purge.
 - Designed for Fedora RPM/COPR installation.
 
 ---
@@ -310,6 +310,7 @@ needs-rebuild
 rebuild
 reinstall
 uninstall
+purge
 enable-systemd
 disable-systemd
 help
@@ -802,29 +803,78 @@ There is deliberately:
 
 ## Removal
 
-Because the manager creates local system state that does not belong directly to the RPM payload, cleanup should be explicit.
+Because the manager creates local system state that does not belong directly to
+the RPM payload, cleanup should be explicit.
 
-Recommended sequence:
+### Remove managed local resources but keep the RPM
+
+Run:
 
 ```bash
 sudo v4l2loopback uninstall
-sudo v4l2loopback disable-systemd
+```
+
+`uninstall` disables and removes the dynamically generated systemd integration,
+unloads the module when possible, removes locally installed
+`v4l2loopback.ko` files and persistent module configuration, and offers the
+existing optional cleanup of the upstream source tree, signing keys, and MOK
+certificate deletion request.
+
+The manager RPM remains installed, so `/usr/bin/v4l2loopback` is still
+available afterwards.
+
+If MOK certificate deletion is requested, `mokutil --delete` only stages the
+request. The certificate remains enrolled until you reboot manually and confirm
+the pending deletion in the blue MOK Manager screen.
+
+### Complete purge including the manager RPM
+
+Recommended complete-removal command:
+
+```bash
+sudo v4l2loopback purge
+```
+
+The purge flow is:
+
+```text
+uninstall managed local resources
+        │
+        ▼
+disable/remove systemd integration
+        │
+        ▼
+optional MOK deletion request
+        │
+        ▼
+dnf remove v4l2loopback-manager
+```
+
+DNF keeps its normal final transaction confirmation; the manager does not pass
+`-y`.
+
+If MOK deletion was successfully staged, the RPM and local resources can be
+removed before reboot, but the overall purge remains pending until the manual
+MOK Manager confirmation is completed.
+
+```text
+RPM removal:            complete
+Local resource cleanup: complete
+MOK deletion request:   pending reboot confirmation
+Overall purge:          pending
+```
+
+No automatic reboot is performed.
+
+A direct:
+
+```bash
 sudo dnf remove v4l2loopback-manager
 ```
 
-The RPM intentionally does **not** silently remove:
-
-```text
-MOK private/public keys
-MOK enrollment state
-/usr/src/v4l2loopback
-locally built kernel modules
-dynamically generated systemd state
-```
-
-This prevents an RPM removal from unexpectedly deleting locally generated Secure Boot material or kernel-module state.
-
-The RPM displays a cleanup reminder during final package removal.
+removes only RPM-owned files. RPM scriptlets intentionally do not perform
+interactive cleanup of locally generated modules, signing material, source
+trees, configuration, or dynamically generated systemd state.
 
 ---
 
@@ -878,7 +928,7 @@ See [`LICENSE`](LICENSE) for the complete license text.
 
 ---
 
-**Current release:** `v1.0.3`
+**Current release:** `v1.0.4`
 **Platform:** Fedora Linux
 **Manager:** `/usr/bin/v4l2loopback`
 **Kernel target:** Fedora default boot kernel via `grubby --default-kernel`

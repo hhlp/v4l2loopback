@@ -2,7 +2,7 @@
 
 This test plan validates the default-boot-kernel selection, signature-aware
 rebuild decision, MOK enrollment handling, `status` reporting, systemd
-integration, Secure Boot recovery workflow and RPM packaging.
+integration, Secure Boot recovery workflow, uninstall/purge behavior and RPM packaging.
 
 > Some tests intentionally move or replace a kernel module. Run them only on a
 > test machine and keep a recovery path available.
@@ -33,7 +33,10 @@ integration, Secure Boot recovery workflow and RPM packaging.
 - [20. Build RPM](#20-build-rpm)
 - [21. RPM install/upgrade](#21-rpm-installupgrade)
 - [22. Upgrade scriptlet behavior](#22-upgrade-scriptlet-behavior)
-- [23. Final removal warning](#23-final-removal-warning)
+- [23. Uninstall behavior](#23-uninstall-behavior)
+- [24. Reinstall preserves systemd integration](#24-reinstall-preserves-systemd-integration)
+- [25. Purge behavior](#25-purge-behavior)
+- [26. Direct RPM removal behavior](#26-direct-rpm-removal-behavior)
 
 <!-- TOC END -->
 
@@ -455,19 +458,144 @@ Upgrade from the previous released RPM to the candidate RPM.
 Expected: `%preun` cleanup warning is **not** shown for the package upgrade,
 because `$1 != 0`.
 
-## 23. Final removal warning
+## 23. Uninstall behavior
+
+Enable the generated systemd integration first:
+
+```bash
+sudo v4l2loopback enable-systemd
+systemctl is-enabled v4l2loopback-rebuild.service
+```
+
+Then run:
+
+```bash
+sudo v4l2loopback uninstall
+```
+
+Expected:
+
+- the dynamically generated systemd unit is disabled and removed;
+- locally installed `v4l2loopback.ko` files are removed;
+- persistent `modprobe.d` and `modules-load.d` configuration is removed;
+- existing optional prompts for source-tree, signing-key and MOK cleanup remain
+  available;
+- the `v4l2loopback-manager` RPM remains installed;
+- `/usr/bin/v4l2loopback` still exists after the command finishes.
+
+Verify:
+
+```bash
+rpm -q v4l2loopback-manager
+test -x /usr/bin/v4l2loopback
+test ! -e /etc/systemd/system/v4l2loopback-rebuild.service
+```
+
+If MOK deletion was selected and `mokutil --delete` succeeded, expected output
+must clearly say that certificate deletion is **pending** and requires a manual
+reboot plus confirmation in the blue MOK Manager screen.
+
+Do not reboot automatically as part of this test.
+
+## 24. Reinstall preserves systemd integration
+
+This test verifies that the new uninstall/systemd behavior does not remove
+existing boot-time integration during `reinstall`.
+
+Start with systemd integration enabled:
+
+```bash
+sudo v4l2loopback enable-systemd
+systemctl is-enabled v4l2loopback-rebuild.service
+```
+
+Run:
+
+```bash
+sudo v4l2loopback reinstall
+```
+
+Complete any existing interactive choices exactly as appropriate for the test
+machine.
+
+Expected after reinstall:
+
+```bash
+systemctl is-enabled v4l2loopback-rebuild.service
+test -e /etc/systemd/system/v4l2loopback-rebuild.service
+```
+
+The service should remain enabled/present because `reinstall` reuses the
+uninstall cleanup path without disabling systemd integration.
+
+## 25. Purge behavior
+
+Use this only on a disposable/test installation because it removes the manager
+RPM.
+
+Run:
+
+```bash
+sudo v4l2loopback purge
+```
+
+Expected:
+
+1. local-resource cleanup runs first;
+2. systemd integration is disabled/removed;
+3. DNF is invoked for `v4l2loopback-manager`;
+4. DNF keeps its normal final transaction confirmation;
+5. after accepting the transaction, the RPM is no longer installed.
+
+Verify:
+
+```bash
+if rpm -q v4l2loopback-manager; then
+    echo "ERROR: RPM still installed"
+    exit 1
+fi
+
+test ! -e /etc/systemd/system/v4l2loopback-rebuild.service
+```
+
+If the DNF transaction is cancelled, expected behavior is that the script
+reports that `v4l2loopback-manager` is still installed.
+
+If MOK certificate deletion was staged successfully before RPM removal, expected
+final state is:
+
+```text
+RPM removal:            complete
+Local resource cleanup: complete
+MOK deletion request:   pending reboot confirmation
+Overall purge:          pending
+```
+
+Then reboot manually and complete the pending deletion in the blue MOK Manager
+screen. The script must never reboot automatically.
+
+## 26. Direct RPM removal behavior
+
+Reinstall the package if needed, create or enable some manager-owned local state
+on the test machine, then run:
 
 ```bash
 sudo dnf remove v4l2loopback-manager
 ```
 
-Expected: `%preun` prints the cleanup reminder before final removal. The RPM does
-not silently delete local MOK state, signing keys, source, built modules or the
-dynamically generated systemd unit.
+Expected:
 
-For a clean removal test, execute before DNF removal:
+- `%preun` is informational only;
+- no interactive cleanup is attempted from the RPM transaction;
+- the RPM-owned manager files are removed;
+- local MOK state, locally generated signing keys, source tree, built modules,
+  and dynamically generated systemd state are not silently deleted by the RPM
+  scriptlet.
+
+This direct-removal path is intentionally different from:
 
 ```bash
-sudo v4l2loopback uninstall
-sudo v4l2loopback disable-systemd
+sudo v4l2loopback purge
 ```
+
+which performs explicit manager cleanup before asking DNF to remove the RPM.

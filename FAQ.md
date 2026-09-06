@@ -30,6 +30,7 @@
 - [Do BIOS/UEFI updates require a rebuild?](#do-biosuefi-updates-require-a-rebuild)
 - [What if `/dev/video10` is missing?](#what-if-devvideo10-is-missing)
 - [How do I remove everything managed locally?](#how-do-i-remove-everything-managed-locally)
+- [What is the difference between `uninstall`, `purge`, and direct DNF removal?](#what-is-the-difference-between-uninstall-purge-and-direct-dnf-removal)
 
 <!-- TOC END -->
 
@@ -295,15 +296,56 @@ sudo modprobe v4l2loopback \
 
 ## How do I remove everything managed locally?
 
-Start while the command still exists:
+For complete removal, use:
+
+```bash
+sudo v4l2loopback purge
+```
+
+`purge` first runs the manager's local cleanup and then asks DNF to remove the
+`v4l2loopback-manager` RPM.
+
+DNF still asks for its normal final transaction confirmation.
+
+If MOK certificate deletion is selected during cleanup, the request is only
+**staged**. The certificate remains enrolled until you reboot manually and
+confirm the pending deletion in the blue MOK Manager screen.
+
+No automatic reboot is performed.
+
+If you want to remove the locally managed resources but keep the RPM installed,
+run instead:
 
 ```bash
 sudo v4l2loopback uninstall
-sudo v4l2loopback disable-systemd
 ```
 
-Then remove the RPM:
+`uninstall` also disables and removes the dynamically generated systemd
+integration, so a separate `disable-systemd` command is no longer required for
+the normal uninstall path.
 
-```bash
-sudo dnf remove v4l2loopback-manager
+## What is the difference between `uninstall`, `purge`, and direct DNF removal?
+
+```text
+v4l2loopback uninstall
+    -> clean managed local resources
+    -> disable/remove systemd integration
+    -> optionally stage MOK deletion
+    -> keep v4l2loopback-manager installed
+
+v4l2loopback purge
+    -> run uninstall cleanup
+    -> remove v4l2loopback-manager through DNF
+    -> report pending MOK confirmation when applicable
+
+dnf remove v4l2loopback-manager
+    -> remove RPM-owned manager files only
+    -> do not run interactive local-resource cleanup
 ```
+
+If `mokutil --delete` successfully stages certificate deletion, removing the RPM
+before reboot is safe for that request: MOK Manager processes the pending
+firmware/shim enrollment-state change independently of `/usr/bin/v4l2loopback`.
+
+The purge is not fully complete until the pending MOK deletion has been
+confirmed at the next manual reboot.
