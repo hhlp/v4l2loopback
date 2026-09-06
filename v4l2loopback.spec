@@ -1,5 +1,5 @@
 Name:           v4l2loopback-manager
-Version:        1.0.4
+Version:        1.0.5
 Release:        1%{?dist}
 Summary:        Secure Boot manager for v4l2loopback on Fedora
 
@@ -47,24 +47,23 @@ install -Dpm0755 v4l2loopback.sh \
 
 %preun
 # $1 == 0 means final package removal.
-# Do not show this message during an RPM upgrade.
+# Interactive cleanup is intentionally not performed from RPM scriptlets.
+# The recommended complete-removal path is `v4l2loopback purge`, which
+# performs cleanup before asking DNF to remove this package.
 if [ "$1" -eq 0 ]; then
     echo
     echo "================================================================"
-    echo " WARNING: v4l2loopback-manager is being removed."
+    echo " v4l2loopback-manager RPM is being removed."
     echo
-    echo " Recommended cleanup BEFORE removing this package:"
+    echo " RPM removal does not perform interactive cleanup of locally"
+    echo " managed v4l2loopback resources."
     echo
-    echo "   sudo v4l2loopback uninstall"
-    echo "   sudo v4l2loopback disable-systemd"
+    echo " For complete removal, run before direct RPM removal:"
     echo
-    echo " The RPM does NOT automatically remove the locally built"
-    echo " v4l2loopback kernel module, MOK state, source tree, signing"
-    echo " keys, or dynamically-created systemd unit."
+    echo "   sudo v4l2loopback purge"
     echo
-    echo " If those cleanup commands were not run before this DNF"
-    echo " transaction, /usr/bin/v4l2loopback will be removed when"
-    echo " the transaction completes."
+    echo " If MOK deletion is staged by purge, a manual reboot and"
+    echo " confirmation in the blue MOK Manager screen are still required."
     echo "================================================================"
     echo
 fi
@@ -85,6 +84,24 @@ fi
 %{_bindir}/v4l2loopback
 
 %changelog
+* Sun Sep 06 2026 hhlp <2659606+hhlp@users.noreply.github.com> - 1.0.5-1
+- Added the `purge` command for complete removal of resources managed by `v4l2loopback-manager` followed by removal of the manager RPM through DNF.
+- Added explicit tracking of pending MOK certificate deletion during `uninstall` and `purge`.
+- Added final purge status reporting to distinguish a fully completed removal from one that still requires manual MOK deletion confirmation after reboot.
+- `uninstall` now also disables and removes the dynamically-created systemd integration before removing locally managed v4l2loopback resources.
+- `uninstall` continues to keep the `v4l2loopback-manager` RPM installed, while `purge` performs resource cleanup and then removes the RPM.
+- `reinstall` preserves the existing systemd integration while reusing the uninstall cleanup logic, avoiding unintended service removal during a reinstall operation.
+- `purge` uses DNF without automatic confirmation so the user retains control over the final RPM removal transaction.
+- MOK deletion remains explicitly asynchronous: when certificate deletion is staged with `mokutil`, the manager reports that a manual reboot and confirmation in the blue MOK Manager screen are still required.
+- RPM removal no longer attempts or recommends interactive cleanup from the `%preun` scriptlet; interactive resource cleanup is handled by the manager commands instead.
+- Direct `dnf remove v4l2loopback-manager` removes only the RPM-managed manager files and intentionally preserves locally-created resources.
+- Fixed the package-removal workflow where `%preun` recommended running `v4l2loopback uninstall` after the DNF removal transaction had already started and `/usr/bin/v4l2loopback` was about to be removed.
+- Fixed systemd integration being left behind when explicitly uninstalling resources managed by `v4l2loopback-manager`.
+- Prevented `reinstall` from unintentionally disabling an existing v4l2loopback systemd integration.
+- Prevented `purge` from reporting complete removal when MOK certificate deletion is still pending confirmation during the next reboot.
+- MOK certificate deletion continues to require explicit user confirmation and is never completed automatically by the RPM removal process.
+- Reboot after staging MOK certificate deletion remains explicitly manual.
+
 * Mon Aug 31 2026 hhlp <2659606+hhlp@users.noreply.github.com> - 1.0.4-1
 - Added the `status` command to report the Fedora default boot kernel, Secure Boot state, signing-key files, MOK enrollment, target-module presence, module signer, and running-kernel module state.
 - Added explicit MOK enrollment verification before deciding whether a valid signed module requires attention.
@@ -96,6 +113,12 @@ fi
 - MOK recovery instructions now make the reboot step explicitly manual.
 - Fixed false `Signing certificate is NOT enrolled` reports caused by relying only on the exit status of `mokutil --test-key`.
 - Avoided regenerating signing keys as a response to lost MOK enrollment.
+- Added `purge` for complete managed-resource cleanup followed by removal of the v4l2loopback-manager RPM through DNF.
+- `uninstall` now disables and removes the dynamically-created systemd integration while keeping the manager RPM installed.
+- `reinstall` preserves existing systemd integration while reusing the uninstall cleanup path.
+- Track successful MOK deletion requests and clearly report when final removal is pending manual confirmation in the blue MOK Manager screen.
+- Never reboot automatically after MOK enrollment or deletion requests.
+- Direct RPM removal remains non-interactive and does not automatically remove locally-created modules, MOK state, sources, signing keys, configuration, or dynamically-created systemd resources.
 
 * Fri Aug 28 2026 hhlp <louzaoh@gmail.com> - 1.0.3-1
 - Added `CHANGELOG.md` to maintain a structured release history following Keep a Changelog conventions.

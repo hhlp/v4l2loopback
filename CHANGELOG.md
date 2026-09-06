@@ -17,6 +17,59 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.0.5] - 2026-09-06
+
+### Added
+
+- Added the `purge` command for complete removal of resources managed by
+  `v4l2loopback-manager` followed by removal of the manager RPM through DNF.
+- Added explicit tracking of pending MOK certificate deletion during
+  `uninstall` and `purge`.
+- Added final purge status reporting to distinguish a fully completed removal
+  from one that still requires manual MOK deletion confirmation after reboot.
+
+### Changed
+
+- `uninstall` now also disables and removes the dynamically-created systemd
+  integration before removing locally managed v4l2loopback resources.
+- `uninstall` continues to keep the `v4l2loopback-manager` RPM installed,
+  while `purge` performs resource cleanup and then removes the RPM.
+- `reinstall` preserves the existing systemd integration while reusing the
+  uninstall cleanup logic, avoiding unintended service removal during a
+  reinstall operation.
+- `purge` uses DNF without automatic confirmation so the user retains control
+  over the final RPM removal transaction.
+- MOK deletion remains explicitly asynchronous: when certificate deletion is
+  staged with `mokutil`, the manager reports that a manual reboot and
+  confirmation in the blue MOK Manager screen are still required.
+- RPM removal no longer attempts or recommends interactive cleanup from the
+  `%preun` scriptlet; interactive resource cleanup is handled by the manager
+  commands instead.
+- Direct `dnf remove v4l2loopback-manager` removes only the RPM-managed
+  manager files and intentionally preserves locally-created resources.
+
+### Fixed
+
+- Fixed the package-removal workflow where `%preun` recommended running
+  `v4l2loopback uninstall` after the DNF removal transaction had already
+  started and `/usr/bin/v4l2loopback` was about to be removed.
+- Fixed systemd integration being left behind when explicitly uninstalling
+  resources managed by `v4l2loopback-manager`.
+- Prevented `reinstall` from unintentionally disabling an existing
+  v4l2loopback systemd integration.
+- Prevented `purge` from reporting complete removal when MOK certificate
+  deletion is still pending confirmation during the next reboot.
+
+### Security
+
+- MOK certificate deletion continues to require explicit user confirmation
+  and is never completed automatically by the RPM removal process.
+- Reboot after staging MOK certificate deletion remains explicitly manual.
+
+
+
+---
+
 ## [1.0.4] - 2026-08-31
 
 ### Added
@@ -49,8 +102,6 @@ and this project follows [Semantic Versioning](https://semver.org/).
 - Fixed false `Signing certificate is NOT enrolled` reports caused by relying
   only on the exit status of `mokutil --test-key`.
 - Avoided regenerating signing keys as a response to lost MOK enrollment.
-
-
 
 ---
 
@@ -181,12 +232,17 @@ v1.0.3
    │
    │  Documentation, CI and release automation
    ▼
+v1.0.4
+   │
+   │  Status and MOK enrollment recovery
+   ▼
 Unreleased
 ```
 
 ---
 
-[Unreleased]: https://github.com/hhlp/v4l2loopback/compare/v1.0.4...HEAD
+[Unreleased]: https://github.com/hhlp/v4l2loopback/compare/v1.0.5...HEAD
+[1.0.5]: https://github.com/hhlp/v4l2loopback/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/hhlp/v4l2loopback/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/hhlp/v4l2loopback/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/hhlp/v4l2loopback/compare/v1.0.1...v1.0.2

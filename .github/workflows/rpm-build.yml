@@ -8,9 +8,9 @@ on:
       - "v4l2loopback.sh"
       - "v4l2loopback.spec"
       - "CHANGELOG.md"
-      - "scripts/prepare-release.sh"
       - ".github/workflows/rpm-build.yml"
       - ".github/workflows/release.yml"
+      - ".github/workflows/copr-release.yml"
 
   pull_request:
     branches:
@@ -19,9 +19,9 @@ on:
       - "v4l2loopback.sh"
       - "v4l2loopback.spec"
       - "CHANGELOG.md"
-      - "scripts/prepare-release.sh"
       - ".github/workflows/rpm-build.yml"
       - ".github/workflows/release.yml"
+      - ".github/workflows/copr-release.yml"
 
   workflow_dispatch:
 

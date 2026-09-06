@@ -10,6 +10,7 @@
 #   rebuild
 #   reinstall
 #   uninstall
+#   purge
 #   enable-systemd
 #   disable-systemd
 #   help
@@ -48,6 +49,9 @@ PROGRAM_PATH="/usr/bin/v4l2loopback"
 
 SYSTEMD_SERVICE_NAME="v4l2loopback-rebuild.service"
 SYSTEMD_SERVICE="/etc/systemd/system/$SYSTEMD_SERVICE_NAME"
+
+PACKAGE_NAME="v4l2loopback-manager"
+MOK_DELETE_PENDING=false
 
 # ============================================================
 # GET FEDORA DEFAULT BOOT KERNEL
@@ -793,8 +797,7 @@ EOF
     # ========================================================
 
     if systemctl is-enabled \
-        "$SYSTEMD_SERVICE_NAME" >/dev/null 2>&1
-    then
+        "$SYSTEMD_SERVICE_NAME" >/dev/null 2>&1; then
         echo "✅ systemd service is already enabled:"
         echo "   $SYSTEMD_SERVICE_NAME"
         echo
@@ -876,8 +879,7 @@ disable_systemd() {
     # ========================================================
 
     if systemctl is-enabled \
-        "$SYSTEMD_SERVICE_NAME" >/dev/null 2>&1
-    then
+        "$SYSTEMD_SERVICE_NAME" >/dev/null 2>&1; then
         echo "⚙️ systemd service is enabled:"
         echo "   $SYSTEMD_SERVICE_NAME"
         echo
@@ -942,8 +944,7 @@ disable_systemd() {
     # ========================================================
 
     if systemctl is-failed \
-        "$SYSTEMD_SERVICE_NAME" >/dev/null 2>&1
-    then
+        "$SYSTEMD_SERVICE_NAME" >/dev/null 2>&1; then
         echo
         echo "⚠️ Service has a failed state."
         echo "→ Clearing failed state..."
@@ -975,6 +976,7 @@ disable_systemd() {
 # ============================================================
 
 uninstall_module() {
+    local disable_systemd_integration="${1:-true}"
     local der_to_delete=""
     local tmp_dir=""
     local yn
@@ -983,6 +985,15 @@ uninstall_module() {
 
     echo "=== 🧼 Uninstalling $MODULE_NAME ==="
     echo
+
+    # --------------------------------------------------------
+    # Disable systemd integration
+    # --------------------------------------------------------
+
+    if [[ "$disable_systemd_integration" == true ]]; then
+        disable_systemd
+        echo
+    fi
 
     # --------------------------------------------------------
     # Unload
@@ -1021,8 +1032,7 @@ uninstall_module() {
                     -in "$f" \
                     -noout \
                     -subject 2>/dev/null |
-                    grep -q "$CN_MATCH"
-                then
+                    grep -q "$CN_MATCH"; then
                     der_to_delete="$tmp_dir/$f"
                     break
                 fi
@@ -1042,14 +1052,23 @@ uninstall_module() {
                 yn
 
             if [[ "$yn" =~ ^[Yy]$ ]]; then
-                sudo mokutil --delete "$der_to_delete" || true
+                if sudo mokutil --delete "$der_to_delete"; then
+                    MOK_DELETE_PENDING=true
 
-                echo
-                sudo mokutil --list-delete || true
+                    echo
+                    sudo mokutil --list-delete || true
 
-                echo
-                echo "👉 Reboot and confirm 'Delete MOK'"
-                echo "   in the MOK Manager screen."
+                    echo
+                    echo "⚠️ MOK certificate deletion has been scheduled."
+                    echo "   The certificate has NOT been deleted yet."
+                    echo
+                    echo "   Reboot manually and complete the pending MOK"
+                    echo "   deletion in the blue MOK Manager screen."
+                else
+                    echo
+                    echo "⚠️ Unable to schedule MOK certificate deletion."
+                    echo "   The certificate has been preserved."
+                fi
             else
                 echo "ℹ️ MOK certificate preserved."
             fi
@@ -1137,7 +1156,64 @@ uninstall_module() {
     fi
 
     echo
-    echo "✅ Uninstall complete."
+
+    if [[ "$MOK_DELETE_PENDING" == true ]]; then
+        echo "⚠️ Local uninstall completed with MOK deletion pending."
+        echo "   Reboot manually and confirm the pending deletion"
+        echo "   in the blue MOK Manager screen."
+    else
+        echo "✅ Uninstall complete."
+    fi
+}
+
+# ============================================================
+# PURGE MANAGER
+# ============================================================
+
+purge_manager() {
+    echo "=== 🧹 Purging $PACKAGE_NAME ==="
+    echo
+
+    uninstall_module true
+
+    echo
+    echo "============================================================"
+    echo " Local v4l2loopback resources have been processed."
+    echo
+    echo " The $PACKAGE_NAME RPM will now be removed."
+    echo " DNF will ask for final transaction confirmation."
+    echo "============================================================"
+    echo
+
+    sudo dnf remove "$PACKAGE_NAME"
+
+    echo
+
+    if rpm -q "$PACKAGE_NAME" >/dev/null 2>&1; then
+        echo "⚠️ $PACKAGE_NAME is still installed."
+        echo "   The DNF package-removal step was not completed."
+    elif [[ "$MOK_DELETE_PENDING" == true ]]; then
+        echo "============================================================"
+        echo " ⚠️ PURGE PENDING MOK CONFIRMATION"
+        echo
+        echo " The $PACKAGE_NAME RPM has been removed and local"
+        echo " v4l2loopback resources have been processed."
+        echo
+        echo " The signing certificate deletion is still pending."
+        echo " The certificate remains enrolled until you complete"
+        echo " the deletion in MOK Manager."
+        echo
+        echo " Complete the purge manually:"
+        echo
+        echo "   1. Reboot the computer."
+        echo "   2. Enter the blue MOK Manager screen."
+        echo "   3. Complete the pending MOK deletion."
+        echo
+        echo " No automatic reboot will be performed."
+        echo "============================================================"
+    else
+        echo "✅ $PACKAGE_NAME purge completed."
+    fi
 }
 
 # ============================================================
@@ -1148,7 +1224,8 @@ reinstall_module() {
     echo "=== 🔄 Reinstalling $MODULE_NAME ==="
     echo
 
-    uninstall_module
+    # Preserve any existing systemd integration during reinstall.
+    uninstall_module false
 
     echo
     echo "📥 Preparing source repository..."
@@ -1221,13 +1298,37 @@ Commands:
         Uninstall, restore source/configuration and rebuild.
 
     uninstall
-        Remove installed v4l2loopback modules and
-        configuration.
+        Remove resources managed by v4l2loopback-manager while keeping
+        the manager RPM installed.
+
+        This command:
+            - disables and removes the systemd integration
+            - unloads and removes installed v4l2loopback modules
+            - removes module configuration
 
         Optionally:
             - stage MOK deletion
             - remove source repository
             - remove signing keys
+
+        If MOK deletion is staged, a manual reboot and confirmation in
+        the blue MOK Manager screen are still required.
+
+        The v4l2loopback-manager RPM itself is NOT removed.
+
+    purge
+        Perform a complete v4l2loopback-manager removal.
+
+        This command runs uninstall first and then removes the
+        v4l2loopback-manager RPM using DNF.
+
+        DNF asks for final transaction confirmation before removing
+        the manager package.
+
+        If MOK deletion is staged, the purge remains pending until you
+        reboot manually and complete the deletion in MOK Manager.
+
+        No automatic reboot is performed.
 
     enable-systemd
         Install and enable:
@@ -1298,7 +1399,11 @@ case "$cmd" in
         ;;
 
     uninstall)
-        uninstall_module
+        uninstall_module true
+        ;;
+
+    purge)
+        purge_manager
         ;;
 
     enable-systemd)
