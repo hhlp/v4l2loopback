@@ -1,5 +1,5 @@
 Name:           v4l2loopback-manager
-Version:        1.0.5
+Version:        1.0.6
 Release:        1%{?dist}
 Summary:        Secure Boot manager for v4l2loopback on Fedora
 
@@ -51,22 +51,24 @@ install -Dpm0755 v4l2loopback.sh \
 # The recommended complete-removal path is `v4l2loopback purge`, which
 # performs cleanup before asking DNF to remove this package.
 if [ "$1" -eq 0 ]; then
-    echo
-    echo "================================================================"
-    echo " v4l2loopback-manager RPM is being removed."
-    echo
-    echo " RPM removal does not perform interactive cleanup of locally"
-    echo " managed v4l2loopback resources."
-    echo
-    echo " For complete removal, run before direct RPM removal:"
-    echo
-    echo "   sudo v4l2loopback purge"
-    echo
-    echo " If MOK deletion is staged by purge, a manual reboot and"
-    echo " confirmation in the blue MOK Manager screen are still required."
-    echo "================================================================"
-    echo
+    if [ -e /etc/systemd/system/v4l2loopback-rebuild.service ] ||
+       [ -e /var/lib/shim-signed/mok/v4l.key ] ||
+       [ -e /var/lib/shim-signed/mok/v4l.der ]; then
+
+        echo
+        echo "v4l2loopback-manager integration may still be configured."
+        echo
+        echo "For complete cleanup before RPM removal, cancel this transaction"
+        echo "and run:"
+        echo
+        echo "    sudo v4l2loopback purge"
+        echo
+        echo "The purge command processes vmwmanager integration resources"
+        echo "and then starts the DNF removal transaction itself."
+        echo
+    fi
 fi
+
 
 # Never fail the RPM transaction because of this informational scriptlet.
 :
@@ -84,6 +86,9 @@ fi
 %{_bindir}/v4l2loopback
 
 %changelog
+* Fri Sep 11 2026 hhlp <2659606+hhlp@users.noreply.github.com> - 1.0.6-1
+- add to .spec only show the message is leftlover exist
+
 * Sun Sep 06 2026 hhlp <2659606+hhlp@users.noreply.github.com> - 1.0.5-1
 - Added the `purge` command for complete removal of resources managed by `v4l2loopback-manager` followed by removal of the manager RPM through DNF.
 - Added explicit tracking of pending MOK certificate deletion during `uninstall` and `purge`.

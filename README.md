@@ -928,7 +928,7 @@ See [`LICENSE`](LICENSE) for the complete license text.
 
 ---
 
-**Current release:** `v1.0.4`
+**Current release:** `v1.0.5`
 **Platform:** Fedora Linux
 **Manager:** `/usr/bin/v4l2loopback`
 **Kernel target:** Fedora default boot kernel via `grubby --default-kernel`

@@ -17,6 +17,16 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.0.6] - 2026-09-11
+
+### Changed
+
+- add to .spec only show the message is leftlover exist
+
+
+
+---
+
 ## [1.0.5] - 2026-09-06
 
 ### Added
@@ -236,12 +246,17 @@ v1.0.4
    │
    │  Status and MOK enrollment recovery
    ▼
+v1.0.5
+   │
+   │  Add purge routine
+   ▼
 Unreleased
 ```
 
 ---
 
-[Unreleased]: https://github.com/hhlp/v4l2loopback/compare/v1.0.5...HEAD
+[Unreleased]: https://github.com/hhlp/v4l2loopback/compare/v1.0.6...HEAD
+[1.0.6]: https://github.com/hhlp/v4l2loopback/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/hhlp/v4l2loopback/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/hhlp/v4l2loopback/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/hhlp/v4l2loopback/compare/v1.0.2...v1.0.3
